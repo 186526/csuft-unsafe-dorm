@@ -16,3 +16,6 @@ export const BASE_TOKEN_FOR_AUTHORIZATION = `Zmx5c291cmNlX3dpc2Vfd3hhcHA6REE3ODh
 export const CAPTCHA_API_URL = 'flySource-auth/captcha';
 export const LOGIN_API_URL = 'flySource-auth/oauth/token';
 export const LIST_TASK_API_URL = 'flySource-yxgl/dormSignTask/getListForApp';
+export const GET_TASK_API_URL = 'flySource-yxgl/dormSignTask/getTaskByIdForApp';
+export const GET_RECORD_STATUS_API_URL = 'flySource-yxgl/dormSignRecord/getOne';
+export const SIGN_RECORD_API_URL = 'flySource-yxgl/dormSignRecord/stuSign';

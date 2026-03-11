@@ -33,9 +33,9 @@ export function getDistance(
             Math.asin(
                 Math.sqrt(
                     Math.pow(Math.sin(g / 2), 2) +
-                        Math.cos(a) *
-                            Math.cos(i) *
-                            Math.pow(Math.sin(o / 2), 2),
+                    Math.cos(a) *
+                    Math.cos(i) *
+                    Math.pow(Math.sin(o / 2), 2),
                 ),
             );
     return ((l *= 6378.137), (l = Math.round(1e4 * l) / 10));
@@ -55,6 +55,15 @@ export class unsafeDorm {
     public userAgent: string = constant.RANDOM_UA();
 
     private authInfo!: types.AuthTokenResponse;
+
+    public taskList: {
+        [taskId: string]: types.TaskInfo;
+    } = {};
+
+    public recordList: {
+        [taskId: string]: types.RecordStatus;
+    } = {};
+
 
     constructor({
         username,
@@ -204,14 +213,17 @@ export class unsafeDorm {
         return true;
     }
 
-    async listTask(currentPage: number = 1, pageSize: number = 10) {
+    async listTask(
+        currentPage: number = 1,
+        pageSize: number = 10,
+    ): Promise<types.TaskInfo[]> {
         if (!this.isTokenValid()) {
             throw new Error('Token is invalid, please sign in first.');
         }
 
         const requestUrl = `${this.baseUrl}${constant.LIST_TASK_API_URL}?current=${currentPage}&size=${pageSize}`;
 
-        const request = axios.get(requestUrl, {
+        const request = await axios.get(requestUrl, {
             headers: {
                 'User-Agent': this.userAgent,
                 Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
@@ -225,8 +237,204 @@ export class unsafeDorm {
             },
         });
 
-        return request;
+        request.data.data.records.forEach((task: types.TaskInfo) => {
+            this.taskList[task.taskId] = task;
+        });
+
+        return request.data.data.records;
     }
+
+    async getTask(taskId: string): Promise<types.TaskDetails> {
+        if (!this.isTokenValid()) {
+            throw new Error('Token is invalid, please sign in first.');
+        }
+
+        const requestUrl = `${this.baseUrl}${constant.GET_TASK_API_URL}?taskId=${taskId}`;
+
+        const request = await axios.get(requestUrl, {
+            headers: {
+                'User-Agent': this.userAgent,
+                Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
+                'Flysource-Sign': this.calcSignHeader(
+                    requestUrl,
+                    this.authInfo.access_token,
+                ),
+                'Flysource-Auth': this.authInfo.access_token,
+                Referer:
+                    'https://servicewechat.com/wx0e47c34c9982aa09/7/page-frame.html',
+            },
+        });
+
+        if (!request.data.success) {
+            throw new Error('Failed to get task detail.');
+        }
+
+        if (request.data.data.taskId != taskId) {
+            throw new Error('Task ID mismatch.');
+        }
+
+        this.taskList[taskId] = request.data.data;
+
+        return request.data.data;
+    }
+
+    public async getRecordStatus(taskId: string): Promise<types.RecordStatus> {
+        if (!this.isTokenValid()) {
+            throw new Error('Token is invalid, please sign in first.');
+        }
+
+        const requestUrl = `${this.baseUrl}${constant.GET_RECORD_STATUS_API_URL}?taskId=${taskId}`;
+
+        const request = await axios.get(requestUrl, {
+            headers: {
+                'User-Agent': this.userAgent,
+                Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
+                'Flysource-Sign': this.calcSignHeader(
+                    requestUrl,
+                    this.authInfo.access_token,
+                ),
+                'Flysource-Auth': this.authInfo.access_token,
+                Referer:
+                    'https://servicewechat.com/wx0e47c34c9982aa09/7/page-frame.html',
+            }
+        });
+
+        if (!request.data.success) {
+            throw new Error('Failed to get record status.');
+        }
+
+        this.recordList[taskId] = request.data.data;
+
+        return this.recordList[taskId];
+    }
+
+    public async signRecord({
+        taskId, signLat, signLng, roomId
+    }: {
+        taskId: string,
+        signLat: string,
+        signLng: string,
+        roomId: string,
+    }): Promise<boolean> {
+        if (!this.isTokenValid()) {
+            throw new Error('Token is invalid, please sign in first.');
+        }
+
+        if (this.taskList[taskId] == undefined) {
+            await this.getTask(taskId);
+        }
+
+        // Check Record Status
+
+        const recordStatus = await this.getRecordStatus(taskId);
+
+        if (recordStatus.signStatus != 3) {
+            throw new Error('Record status is not normal unsigned, may be already signed or not allowed to sign.');
+        }
+
+        const taskInfo = this.taskList[taskId];
+
+        // Check Location & Dorm Info
+
+        if (taskInfo.dormitoryRegisterVO == undefined) {
+            throw new Error('Task does not have dormitory register info.');
+        }
+
+        if (taskInfo.dormitoryRegisterVO.locationLat == undefined || taskInfo.dormitoryRegisterVO.locationLng == undefined) {
+            throw new Error('Task does not have dormitory location info.');
+        }
+
+
+        const dormLat = taskInfo.dormitoryRegisterVO.locationLat,
+            dormLng = taskInfo.dormitoryRegisterVO.locationLng;
+
+        const locationAccuracy = getDistance(
+            parseFloat(signLat),
+            parseFloat(signLng),
+            parseFloat(dormLat),
+            parseFloat(dormLng)
+        );
+
+        if (locationAccuracy >= parseFloat(taskInfo.locationAccuracy)) {
+            throw new Error(`Location accuracy ${locationAccuracy} is too low, not allowed to sign record.`);
+        }
+
+        if (roomId != taskInfo.dormitoryRegisterVO.roomId) {
+            throw new Error(`roomId ${roomId} is not same as roomId in taskInfo, may enter a wrong roomId`);
+        }
+
+        // Check Photo Requirement
+
+        if (taskInfo.openTakePhoto == 1) {
+            throw new Error('Task requires photo, which is not supported in current version.');
+        }
+
+        // Check Time
+
+        const now = new Date();
+
+        // Notice: Sign start & End in UTC+8.
+        const signStartTime = new Date(`${recordStatus.signDate}T${taskInfo.signStartTime}+0800`);
+        const signEndTime = new Date(`${recordStatus.signDate}T${taskInfo.signEndTime}+0800`);
+
+        if (now < signStartTime || now > signEndTime) {
+            throw new Error(`Current time ${now.toISOString()} is not within sign time range ${signStartTime.toISOString()} - ${signEndTime.toISOString()}.`);
+        }
+
+        const stuSignData: types.stuSignData = {
+            taskId,
+            scanType: taskInfo.scanType,
+            roomId,
+            isLateStuTakePhoto: taskInfo.isLateStuTakePhoto,
+            signLat,
+            signLng,
+            locationAccuracy,
+            stuTaskId: md5(JSON.stringify({
+                latitude: signLat,
+                longitude: signLng,
+                locationAccuracy,
+                signDate: recordStatus.signDate,
+                taskId,
+            })),
+            signType: 0,
+            scanCode: '',
+        };
+
+        const requestUrl = `${this.baseUrl}${constant.SIGN_RECORD_API_URL}`;
+
+        const request = await axios.post(
+            requestUrl,
+            stuSignData,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': this.userAgent,
+                    Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
+                    'Flysource-Sign': this.calcSignHeader(
+                        requestUrl,
+                        this.authInfo.access_token,
+                    ),
+                    'Flysource-Auth': this.authInfo.access_token,
+                    Referer:
+                        'https://servicewechat.com/wx0e47c34c9982aa09/7/page-frame.html',
+                }
+            }
+        );
+
+        if (!request.data.success) {
+            throw new Error(`Failed to sign record, message: ${request.data.message}`);
+        }
+
+        const recheckRecordStatus = await this.getRecordStatus(taskId);
+
+        if (recheckRecordStatus.signStatus != 0) {
+            throw new Error('After signing record, record status is still not signed, may be failed to sign record.');
+        }
+
+        return true;
+
+    }
+
 }
 
 export default unsafeDorm;
