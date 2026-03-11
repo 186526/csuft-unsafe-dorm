@@ -288,7 +288,6 @@ export class unsafeDorm {
         const request = await axios.get(requestUrl, {
             headers: {
                 'User-Agent': this.userAgent,
-                Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
                 'Flysource-Sign': this.calcSignHeader(
                     requestUrl,
                     this.authInfo.access_token,
@@ -312,8 +311,8 @@ export class unsafeDorm {
         taskId, signLat, signLng, roomId
     }: {
         taskId: string,
-        signLat: string,
-        signLng: string,
+        signLat: string | number,
+        signLng: string | number,
         roomId: string,
     }): Promise<boolean> {
         if (!this.isTokenValid()) {
@@ -349,10 +348,10 @@ export class unsafeDorm {
             dormLng = taskInfo.dormitoryRegisterVO.locationLng;
 
         const locationAccuracy = getDistance(
-            parseFloat(signLat),
-            parseFloat(signLng),
-            parseFloat(dormLat),
-            parseFloat(dormLng)
+            parseFloat(signLat.toString()),
+            parseFloat(signLng.toString()),
+            parseFloat(dormLat.toString()),
+            parseFloat(dormLng.toString())
         );
 
         if (locationAccuracy >= parseFloat(taskInfo.locationAccuracy)) {
@@ -381,20 +380,24 @@ export class unsafeDorm {
             throw new Error(`Current time ${now.toISOString()} is not within sign time range ${signStartTime.toISOString()} - ${signEndTime.toISOString()}.`);
         }
 
+        const processedLat = parseFloat(parseFloat(signLat.toString()).toFixed(6)),
+            processedLng = parseFloat(parseFloat(signLng.toString()).toFixed(6));
+
         const stuSignData: types.stuSignData = {
             taskId,
             scanType: taskInfo.scanType,
             roomId,
             isLateStuTakePhoto: taskInfo.isLateStuTakePhoto,
-            signLat,
-            signLng,
+            signLat: processedLat,
+            signLng: processedLng,
             locationAccuracy,
             stuTaskId: md5(JSON.stringify({
-                latitude: signLat,
-                longitude: signLng,
-                locationAccuracy,
+                latitude: processedLat.toString(),
+                longitude: processedLng.toString(),
+                locationAccuracy: locationAccuracy.toString(),
                 signDate: recordStatus.signDate,
                 taskId,
+                fileId: ""
             })),
             signType: 0,
             scanCode: '',
@@ -409,7 +412,6 @@ export class unsafeDorm {
                 headers: {
                     'Content-Type': 'application/json',
                     'User-Agent': this.userAgent,
-                    Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
                     'Flysource-Sign': this.calcSignHeader(
                         requestUrl,
                         this.authInfo.access_token,
@@ -420,9 +422,9 @@ export class unsafeDorm {
                 }
             }
         );
-
+        
         if (!request.data.success) {
-            throw new Error(`Failed to sign record, message: ${request.data.message}`);
+            throw new Error(`Failed to sign record, message: ${request.data}`);
         }
 
         const recheckRecordStatus = await this.getRecordStatus(taskId);

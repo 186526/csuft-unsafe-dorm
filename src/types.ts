@@ -5,8 +5,8 @@ export interface stuSignData {
     scanType: string; // taskInfo.scanType 晚打卡项目疑似为 1
     roomId: string; // taskInfo.dormitoryRegisterVO.roomId, 分配的房间 Id，Int.length==36
     isLateStuTakePhoto: number; // taskInfo.isLateStuTakePhoto, 目前为 0
-    signLat: string; // Like "28.1310867391577"
-    signLng: string; // Like "112.994658417835"
+    signLat: number; // Like 28.131086
+    signLng: number; // Like 112.994658
 
     locationAccuracy: ReturnType<typeof getDistance>; // 计算出来的距离，单位为米
 
