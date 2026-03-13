@@ -33,9 +33,9 @@ export function getDistance(
             Math.asin(
                 Math.sqrt(
                     Math.pow(Math.sin(g / 2), 2) +
-                        Math.cos(a) *
-                            Math.cos(i) *
-                            Math.pow(Math.sin(o / 2), 2),
+                    Math.cos(a) *
+                    Math.cos(i) *
+                    Math.pow(Math.sin(o / 2), 2),
                 ),
             );
     return ((l *= 6378.137), (l = Math.round(1e4 * l) / 10));
@@ -69,12 +69,12 @@ export class unsafeDorm {
         password,
         openId,
     }: {
-        username: string;
-        password: string;
+        username?: string;
+        password?: string;
         openId: string;
     }) {
-        this.username = username;
-        this.password = md5(password);
+        this.username = username ?? "";
+        this.password = md5(password ?? "") ?? "";
         this.openId = openId;
     }
 
@@ -137,29 +137,33 @@ export class unsafeDorm {
      * Sign in with username & password, may need captcha.
      * Never work when account is binding with WeChat. Use signInWithOpenId instead.
      *
-     * @param captchaKey captcha key from captcha api
-     * @param captchaCode captcha code from user input
      * @returns
+     * 
+     * @deprecated This method never work because the server only authorize wechat openId now.
      */
-    async signIn(captchaKey: string, captchaCode: string) {
+    async signIn() {
+        const postBody = {
+            username: this.username,
+            password: this.password,
+            // 000000 is the default now.
+            tenantId: '000000',
+            type: 'account',
+            grant_type: 'password',
+            scope: 'all',
+        };
+
+        console.log(postBody);
+
         const request = await axios.post(
             `${this.baseUrl}${constant.LOGIN_API_URL}`,
-            {
-                username: this.username,
-                password: this.password,
-                // 000000 is the default now.
-                tenantId: '000000',
-                // wxapp is the default now.
-                grant_type: 'wxapp',
-                scope: 'all',
-            },
+            postBody,
             {
                 headers: {
                     'User-Agent': this.userAgent,
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Tenant-Id': '000000',
-                    'Captcha-Key': captchaKey,
-                    'Captcha-Code': captchaCode,
+                    // 'Captcha-Key': captchaKey,
+                    // 'Captcha-Code': captchaCode,
                     Authorization: `Basic ${constant.BASE_TOKEN_FOR_AUTHORIZATION}`,
                     referer:
                         'https://servicewechat.com/wx0e47c34c9982aa09/7/page-frame.html',
@@ -326,8 +330,8 @@ export class unsafeDorm {
         }
 
         const processedLat = parseFloat(
-                parseFloat(signLat.toString()).toFixed(6),
-            ),
+            parseFloat(signLat.toString()).toFixed(6),
+        ),
             processedLng = parseFloat(
                 parseFloat(signLng.toString()).toFixed(6),
             );
