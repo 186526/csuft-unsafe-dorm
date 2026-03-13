@@ -4,7 +4,7 @@
 
 ## Running
 
-Refer 到 [this document](./docs/running.md) 来把 csuft-unsafe-dorm 作为一个脚本来运行。
+阅读 [running csuft-unsafe-dorm as script](./docs/running.md) 的教程来了解如何把 csuft-unsafe-dorm 作为一个自动签到脚本来运行。
 
 ## License
 

@@ -2,7 +2,9 @@
 
 以下内容仅供学习和研究使用，请勿用于任何非法用途。
 
-由于我们无法直接使用账号密码登录，因此需要使用 OpenId 来进行鉴权。由于你专仅允许了 wxapp 的 OpenId 作为唯一的 OAuth 鉴权方式，所以请确保你已经在小程序中登录并绑定过。
+由于配置不允许直接使用账号密码登录，因此需要使用 OpenId 来进行鉴权。由于你专仅允许了 wxapp 的 OpenId 作为唯一的 OAuth 鉴权方式，所以请确保你已经在小程序中登录并绑定过。
+
+该 OpenId 理论长期优先，所以以下操作大概率只需要操作首次进行抓取即可。
 
 ## 配置 WMPFDebugger
 
@@ -10,7 +12,7 @@
 
 1. 下载并允许 WMPFDebugger：
 
-    - 克隆 [evi0s/WMPFDebugger GitHub 仓库](https://github.com/evi0s/WMPFDebugger)。值得注意的是，最新版的 Windows 微信客户端的 wxapp 版本是 18955。官方的仓库可能暂时没有对该版本进行支持。你可能可以选择 [186526/WMPFDebugger](https://github.com/186526/WMPFDebugger)，我已经在该仓库中添加了对 wxapp 18955 版本的支持。
+    - clone [evi0s/WMPFDebugger GitHub 仓库](https://github.com/evi0s/WMPFDebugger)。值得注意的是，截至目前最新版的 Windows 微信客户端的 wxapp 版本是 18955。官方的仓库可能暂时没有对该版本进行支持。你可以选择 [186526/WMPFDebugger](https://github.com/186526/WMPFDebugger)，我已经在该仓库中合并了对 wxapp 18955 版本的支持。
 
     - 安装依赖
 

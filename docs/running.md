@@ -1,6 +1,6 @@
 # running csuft-unsafe-dorm as script
 
-csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个默认的 script 实现。
+csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个默认的 autosign script 实现。
 
 如果仅需要基础的虚拟签到，可以直接运行 `yarn run script` 来执行这个脚本。
 
@@ -25,7 +25,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
 
 3. 抓取 OpenId 信息
 
-    > 我们目前无法实现直接使用账号密码登录，因此需要使用 OpenId 来进行鉴权。  
+    > 目前由于服务器配置无法实现直接使用账号密码登录，因此需要使用 OpenId 来进行鉴权。  
     > 由于你专仅允许了 wxapp 的 OpenId 作为唯一的 OAuth 鉴权方式，所以请确保你已经在小程序中登录并绑定过。
 
     请先查阅 [OpenId 抓取指南](./openid.md) 来获取你在小程序的唯一标识符 OpenId。
@@ -65,3 +65,5 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
         ```
 
     - 替换 `/path/to/csuft-unsafe-dorm` 为你本地项目的实际路径，替换 `/path/to/logfile.log` 为你希望保存日志的文件路径。
+
+若有任何疑问，请随时 `unsafe-dorm[AT]186.ee` 联系我，我会在有空闲时尽快回复你。
