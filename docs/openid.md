@@ -1,4 +1,4 @@
-# Hook WXApp to get openid for csuft-unsafe-dorm
+# Hook WMPF to get openid for csuft-unsafe-dorm
 
 以下内容仅供学习和研究使用，请勿用于任何非法用途。
 
@@ -12,7 +12,7 @@
 
 1. 下载并允许 WMPFDebugger：
 
-    - clone [evi0s/WMPFDebugger GitHub 仓库](https://github.com/evi0s/WMPFDebugger)。值得注意的是，截至目前最新版的 Windows 微信客户端的 wxapp 版本是 18955。官方的仓库可能暂时没有对该版本进行支持。你可以选择 [186526/WMPFDebugger](https://github.com/186526/WMPFDebugger)，我已经在该仓库中合并了对 wxapp 18955 版本的支持。
+    - clone [evi0s/WMPFDebugger GitHub 仓库](https://github.com/evi0s/WMPFDebugger)。值得注意的是，截至目前最新版的 Windows 微信客户端的 WMPF 版本是 19027。官方的仓库可能暂时没有对该版本进行支持。你可以选择 [186526/WMPFDebugger](https://github.com/186526/WMPFDebugger)，我已经在该仓库中合并了对 WMPF 19027 版本的支持。
 
     - 安装依赖
 
