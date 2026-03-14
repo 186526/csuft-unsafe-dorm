@@ -210,6 +210,37 @@ export class unsafeDorm {
         return this.authInfo;
     }
 
+    async signInWithAccessToken(token: string) {
+        this.authInfo = {
+            access_token: token,
+            token_type: 'bearer',
+            refresh_token: '',
+            expires_in: 0,
+            scope: '',
+            passWordLevel: 0,
+            avatarUrl: '',
+            accountType: 0,
+            userName: '',
+            roleType: '',
+            userId: '',
+            lastLoginTime: '',
+            oauthId: null,
+            accountNo: '',
+            tenantId: '',
+            roleName: '',
+            userType: 0,
+            detail: {
+                sysAuthType: '',
+                isSysUserSecondAuth: false,
+            },
+            schoolName: '',
+            jti: '',
+        };
+
+        this.isAuthenticated = true;
+        return this.authInfo;
+    }
+
     isTokenValid(): boolean {
         if (!this.isAuthenticated) return false;
 
