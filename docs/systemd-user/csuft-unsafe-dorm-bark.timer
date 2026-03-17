@@ -1,0 +1,11 @@
+[Unit]
+Description=Run CSUFT unsafe dorm Bark notifier on schedule
+
+[Timer]
+OnCalendar=*-*-* 21:40:00
+Persistent=true
+RandomizedDelaySec=3m
+Unit=csuft-unsafe-dorm-bark.service
+
+[Install]
+WantedBy=timers.target

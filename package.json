@@ -11,6 +11,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "script": "tsx src/scripts/index.ts"
-  }
+    "script": "tsx src/scripts/index.ts",
+    "script:bark": "tsx src/scripts/bark-bot.ts"
+  },
+  "license": "MIT"
 }

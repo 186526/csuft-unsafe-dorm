@@ -71,4 +71,47 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
 
     - 替换 `/path/to/csuft-unsafe-dorm` 为你本地项目的实际路径，替换 `/path/to/logfile.log` 为你希望保存日志的文件路径。
 
+7. 使用 systemd user timer 定时执行 Bark 推送脚本
+    - 仓库中有一个使用 Bark 作为推送服务器的示例脚本 `src/scripts/bark-bot.ts`，你可以通过 `yarn run script:bark` 来运行它。
+
+    - 仓库已提供示例 unit 文件：
+        - `docs/systemd-user/csuft-unsafe-dorm-bark.service`
+        - `docs/systemd-user/csuft-unsafe-dorm-bark.timer`
+
+    - 复制 unit 到用户目录：
+
+        ```bash
+        mkdir -p ~/.config/systemd/user
+        cp docs/systemd-user/csuft-unsafe-dorm-bark.service ~/.config/systemd/user/
+        cp docs/systemd-user/csuft-unsafe-dorm-bark.timer ~/.config/systemd/user/
+        ```
+
+    - 创建环境变量文件：
+
+        ```bash
+        mkdir -p ~/.config/csuft-unsafe-dorm
+        cat > ~/.config/csuft-unsafe-dorm/bark.env <<'EOF'
+        openid=你的openid1,你的openid2
+        BARK_API=https://api.day.app
+        BARK_DEVICE_TOKEN=你的bark设备token
+        EOF
+        ```
+
+    - 按需修改 service 文件中的 `WorkingDirectory` 路径，确保与本地仓库路径一致。
+
+    - 启用并立即运行一次：
+
+        ```bash
+        systemctl --user daemon-reload
+        systemctl --user enable --now csuft-unsafe-dorm-bark.timer
+        systemctl --user start csuft-unsafe-dorm-bark.service
+        ```
+
+    - 查看状态与日志：
+
+        ```bash
+        systemctl --user status csuft-unsafe-dorm-bark.timer
+        journalctl --user -u csuft-unsafe-dorm-bark.service -n 100 --no-pager
+        ```
+    
 若有任何疑问，请随时 `unsafe-dorm[AT]186.ee` 联系我，我会在有空闲时尽快回复你。

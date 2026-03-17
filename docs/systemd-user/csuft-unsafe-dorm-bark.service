@@ -1,0 +1,16 @@
+[Unit]
+Description=CSUFT unsafe dorm Bark sign notifier
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/csuft-unsafe-dorm
+EnvironmentFile=%h/.config/csuft-unsafe-dorm/bark.env
+Environment=PATH=%h/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env yarn run script:bark
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
