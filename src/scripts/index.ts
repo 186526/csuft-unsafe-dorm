@@ -1,40 +1,67 @@
-import unsafeDorm, { getDistance } from '../index';
 import process from "node:process";
+import EventEmitter from 'node:events';
+import { pathToFileURL } from 'node:url';
+import main from './main';
+import type { MainEvents } from './main';
 import 'dotenv/config';
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export type { MainEvents } from './main';
 
-if (!process.env.openid) {
-    throw new Error("请在环境变量中设置 openid。");
+interface LogEvents {
+    log: [...args: any[]];
+    error: [...args: any[]];
 }
 
-const App = new unsafeDorm({
-    openId: process.env.openid,
-});
+export async function mainLoop() {
+    if (!process.env.openid) {
+        throw new Error("请在环境变量中设置 openid。");
+    }
 
-await App.signInWithOpenId();
-await sleep(1000);
-const taskInfos = await App.listTask();
-await sleep(1000);
-const taskDetail = await App.getTask(taskInfos[0].taskId);
-await sleep(1000);
+    const openids = process.env.openid.split(',')
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
 
-const signLat = parseFloat(taskDetail.dormitoryRegisterVO.locationLat) + Math.random() * 0.001,
-    signLng = parseFloat(taskDetail.dormitoryRegisterVO.locationLng) + Math.random() * 0.001;
+    const events = new EventEmitter<MainEvents>();
+    const logEvents = new EventEmitter<LogEvents>();
 
-console.log("计算定位偏移 ", getDistance(
-    signLat,
-    signLng,
-    parseFloat(taskDetail.dormitoryRegisterVO.locationLat),
-    parseFloat(taskDetail.dormitoryRegisterVO.locationLng))
-    , "m");
+    logEvents.on('log', (...args) => {
+        console.log(...args);
+    });
 
-const request = await App.signRecord({
-    taskId: taskDetail.taskId,
-    signLat: signLat,
-    signLng: signLng,
-    roomId: taskDetail.dormitoryRegisterVO.roomId,
-});
+    logEvents.on('error', (...args) => {
+        console.error(...args);
+    });
 
-console.log(request);
+    events.on('log', (...args) => {
+        logEvents.emit('log', ...args);
+    });
 
+    events.on('error', (error) => {
+        logEvents.emit('error', '发生错误！', error);
+    });
+
+    events.on('start', (openid) => {
+        logEvents.emit('log', `开始处理 openid: ${openid}`);
+    });
+
+    events.on('finish', (openid) => {
+        logEvents.emit('log', `处理结束 openid: ${openid}`);
+    });
+
+    events.on('destroy', () => {
+        logEvents.removeAllListeners();
+        events.removeAllListeners();
+    });
+
+    await main(openids, events);
+}
+
+const entryFile = process.argv[1];
+const isDirectRun = !!entryFile && import.meta.url === pathToFileURL(entryFile).href;
+
+if (isDirectRun) {
+    mainLoop().catch((error) => {
+        console.error('mainLoop 执行失败:', error);
+        process.exitCode = 1;
+    });
+}
