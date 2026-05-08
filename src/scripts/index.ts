@@ -1,25 +1,26 @@
-import process from "node:process";
 import EventEmitter from 'node:events';
+import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import main from './main.js';
-import type { MainEvents } from './main.js';
 import 'dotenv/config';
+import main from './main.js';
+import type { MainEvents, MainLoopResult } from './main.js';
 
-export type { MainEvents } from './main.js';
+export type { MainEvents, MainLoopResult, OpenIdRunResult, OpenIdRunStatus } from './main.js';
 
 interface LogEvents {
     log: [...args: any[]];
     error: [...args: any[]];
 }
 
-export async function mainLoop() {
+export async function mainLoop(): Promise<MainLoopResult> {
     if (!process.env.openid) {
-        throw new Error("请在环境变量中设置 openid。");
+        throw new Error('请在环境变量中设置 openid。');
     }
 
-    const openids = process.env.openid.split(',')
-        .map((s: string) => s.trim())
-        .filter((s: string) => s.length > 0);
+    const openids = process.env.openid
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
 
     const events = new EventEmitter<MainEvents>();
     const logEvents = new EventEmitter<LogEvents>();
@@ -37,7 +38,7 @@ export async function mainLoop() {
     });
 
     events.on('error', (error) => {
-        logEvents.emit('error', '发生错误！', error);
+        logEvents.emit('error', '发生错误:', error);
     });
 
     events.on('start', (openid) => {
@@ -53,7 +54,7 @@ export async function mainLoop() {
         events.removeAllListeners();
     });
 
-    await main(openids, events);
+    return await main(openids, events);
 }
 
 const entryFile = process.argv[1];

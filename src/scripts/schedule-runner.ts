@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { mainLoop } from './index.js';
 import {
     computeNextRunAt,
@@ -10,7 +11,11 @@ import {
 } from '../scheduler.js';
 import { ensureScheduleLogDir, writeScheduleLog, type ScheduleLogResult } from '../schedule-logging.js';
 
-async function main() {
+function buildResultMessage(successCount: number, skippedCount: number, failureCount: number) {
+    return `自动签到统计：成功 ${successCount}，跳过 ${skippedCount}，失败 ${failureCount}。`;
+}
+
+export async function runScheduledSignIn() {
     await ensureScheduleLogDir();
 
     const startedAt = new Date();
@@ -19,6 +24,7 @@ async function main() {
     ];
     const originalLog = console.log;
     const originalError = console.error;
+
     const appendLine = (...args: unknown[]) => {
         const text = args.map((item) => item instanceof Error ? item.stack ?? item.message : String(item)).join(' ');
         logLines.push(text);
@@ -78,17 +84,46 @@ async function main() {
         started.nextRunAt = computeNextRunAt(started);
         await saveScheduleConfig(started);
 
-        await mainLoop();
-        const success = {
+        const summary = await mainLoop();
+        const summaryMessage = buildResultMessage(summary.successCount, summary.skippedCount, summary.failureCount);
+
+        if (summary.failureCount > 0) {
+            const failure = {
+                ...started,
+                lastResult: 'failure' as const,
+                lastMessage: summaryMessage,
+            };
+            failure.nextRunAt = computeNextRunAt(failure);
+            await saveScheduleConfig(failure);
+            logResult = '失败';
+            console.log(summaryMessage);
+            return;
+        }
+
+        if (summary.successCount > 0) {
+            const success = {
+                ...started,
+                lastSuccessDate: today,
+                lastSuccessAt: new Date().toISOString(),
+                lastResult: 'success' as const,
+                lastMessage: summaryMessage,
+            };
+            success.nextRunAt = computeNextRunAt(success);
+            await saveScheduleConfig(success);
+            logResult = '成功';
+            console.log(summaryMessage);
+            return;
+        }
+
+        const skipped = {
             ...started,
-            lastSuccessDate: today,
-            lastSuccessAt: new Date().toISOString(),
-            lastResult: 'success' as const,
-            lastMessage: '自动签到执行成功。',
+            lastResult: 'skipped' as const,
+            lastMessage: summaryMessage,
         };
-        success.nextRunAt = computeNextRunAt(success);
-        await saveScheduleConfig(success);
-        logResult = '成功';
+        skipped.nextRunAt = computeNextRunAt(skipped);
+        await saveScheduleConfig(skipped);
+        logResult = '跳过';
+        console.log(summaryMessage);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -112,7 +147,11 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    console.error('Scheduled runner failed:', error);
-    process.exitCode = 1;
-});
+const isDirectRun = process.argv[1] != null && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectRun) {
+    runScheduledSignIn().catch((error) => {
+        console.error('Scheduled runner failed:', error);
+        process.exitCode = 1;
+    });
+}

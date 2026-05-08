@@ -24,7 +24,6 @@ export type ScheduleConfig = {
 const ROOT = process.cwd();
 const TOOL_HOME = path.join(ROOT, '.codex-tools');
 export const SCHEDULE_PATH = path.join(TOOL_HOME, 'schedule.json');
-export const TASK_NAME = 'Codex-CSUFT-Unsafe-Dorm';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
@@ -85,7 +84,7 @@ export function matchesScheduleOnDate(config: ScheduleConfig, dateString: string
 }
 
 export function computeNextRunAt(config: ScheduleConfig, from = new Date()) {
-    // 这里按上海时区推导下一次触发时间，和 Windows 计划任务的触发说明保持一致。
+    // 这里按上海时区推导下一次触发时间，和 node-cron 的每日触发规则保持一致。
     if (!config.enabled || !isValidTime(config.time)) {
         return null;
     }

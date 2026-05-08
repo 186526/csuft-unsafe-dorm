@@ -10,13 +10,13 @@ import { URL } from 'node:url';
 import WebSocket, { type RawData } from 'ws';
 import main, { type MainEvents } from './scripts/main.js';
 import {
-    TASK_NAME,
     type ScheduleConfig,
     computeNextRunAt,
     defaultScheduleConfig,
     loadScheduleConfig,
     saveScheduleConfig,
 } from './scheduler.js';
+import { applyRuntimeSchedule, getRuntimeScheduleStatus } from './runtime-scheduler.js';
 import type { AuthTokenResponse, RecordStatus, TaskDetails } from './types.js';
 
 // 本地 Web 服务入口：
@@ -41,12 +41,6 @@ const MITM_CAPTURE_FILE = path.join(MITM_HOME, 'openid-capture.jsonl');
 const MITM_LOG_PATH = path.join(MITM_HOME, 'mitmdump.log');
 const MITM_ADDON_PATH = path.join(ROOT, 'src', 'mitm_openid_addon.py');
 const MITM_CERT_PATH = path.join(process.env.USERPROFILE ?? ROOT, '.mitmproxy', 'mitmproxy-ca-cert.cer');
-const SCHEDULE_COMMAND_PATH = path.join(ROOT, 'run-csuft-unsafe-dorm.cmd');
-const SCHEDULE_REPEAT_INTERVAL_MINUTES = 15;
-const SCHEDULE_REPEAT_DURATION_HOURS = 12;
-const SCHEDULE_RESTART_INTERVAL_MINUTES = 5;
-const SCHEDULE_RESTART_COUNT = 3;
-
 type Summary = {
     startedAt: string;
     completedAt?: string;
@@ -100,9 +94,11 @@ type ProxySettings = {
 
 type ScheduleApiResponse = {
     config: ScheduleConfig;
-    taskInstalled: boolean;
-    taskName: string;
-    commandPath: string;
+    runtimeActive: boolean;
+    driver: 'node-cron';
+    cronPattern: string | null;
+    timezone: string;
+    lastTriggeredAt: string | null;
 };
 
 let runInProgress = false;
@@ -425,61 +421,19 @@ async function commandExists(command: string) {
     }
 }
 
-async function queryTaskInstalled(taskName: string) {
-    const normalized = taskName.startsWith('\\') ? taskName : `\\${taskName}`;
-    try {
-        await runCommand('schtasks.exe', ['/query', '/tn', normalized], ROOT);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-
-async function removeScheduledTask(taskName: string) {
-    const normalized = taskName.startsWith('\\') ? taskName : `\\${taskName}`;
-    if (!(await queryTaskInstalled(taskName))) {
-        return;
-    }
-
-    await runCommand('schtasks.exe', ['/delete', '/tn', normalized, '/f'], ROOT);
-}
-
-function escapePowerShellSingleQuoted(value: string) {
-    return value.replace(/'/g, "''");
-}
-
-async function upsertScheduledTask(taskName: string, time: string) {
-    if (!existsSync(SCHEDULE_COMMAND_PATH)) {
-        throw new Error(`Scheduled command file not found: ${SCHEDULE_COMMAND_PATH}`);
-    }
-
-    const powershellScript = `
-        $taskName = '${escapePowerShellSingleQuoted(taskName)}'
-        $commandPath = '${escapePowerShellSingleQuoted(process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe')}'
-        $commandArgs = '/c ""${escapePowerShellSingleQuoted(SCHEDULE_COMMAND_PATH)}""'
-        $startTime = [datetime]::ParseExact('${escapePowerShellSingleQuoted(time)}', 'HH:mm', $null)
-        $action = New-ScheduledTaskAction -Execute $commandPath -Argument $commandArgs
-        $trigger = New-ScheduledTaskTrigger -Daily -At $startTime
-        $trigger.Repetition.Interval = 'PT${SCHEDULE_REPEAT_INTERVAL_MINUTES}M'
-        $trigger.Repetition.Duration = 'PT${SCHEDULE_REPEAT_DURATION_HOURS}H'
-        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount ${SCHEDULE_RESTART_COUNT} -RestartInterval (New-TimeSpan -Minutes ${SCHEDULE_RESTART_INTERVAL_MINUTES}) -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    `;
-
-    await runPowerShell(powershellScript);
-}
-
 async function buildScheduleResponse(config: ScheduleConfig): Promise<ScheduleApiResponse> {
+    const runtime = getRuntimeScheduleStatus();
     return {
         config: {
             ...defaultScheduleConfig(),
             ...config,
             nextRunAt: computeNextRunAt(config),
         },
-        taskInstalled: await queryTaskInstalled(TASK_NAME),
-        taskName: TASK_NAME,
-        commandPath: path.basename(SCHEDULE_COMMAND_PATH),
+        runtimeActive: runtime.active,
+        driver: runtime.driver,
+        cronPattern: runtime.pattern,
+        timezone: runtime.timezone,
+        lastTriggeredAt: runtime.lastTriggeredAt,
     };
 }
 
@@ -1100,12 +1054,7 @@ const server = createServer(async (req, res) => {
         if (req.method === 'POST' && url.pathname === '/api/schedule') {
             const payload = await readJson<Partial<ScheduleConfig>>(req);
             const saved = await saveScheduleConfig(payload);
-            if (saved.enabled) {
-                await upsertScheduledTask(TASK_NAME, saved.time);
-            }
-            else {
-                await removeScheduledTask(TASK_NAME);
-            }
+            applyRuntimeSchedule(saved);
             sendJson(res, 200, await buildScheduleResponse(saved));
             return;
         }
@@ -1137,6 +1086,15 @@ const server = createServer(async (req, res) => {
     }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`Unsafe dorm server listening on http://127.0.0.1:${PORT}`);
-});
+loadScheduleConfig()
+    .then((config) => {
+        applyRuntimeSchedule(config);
+        server.listen(PORT, '127.0.0.1', () => {
+            console.log(`Unsafe dorm server listening on http://127.0.0.1:${PORT}`);
+            console.log(`Schedule runtime active: ${getRuntimeScheduleStatus().active ? 'yes' : 'no'}`);
+        });
+    })
+    .catch((error) => {
+        console.error('Failed to initialize schedule runtime:', error);
+        process.exit(1);
+    });

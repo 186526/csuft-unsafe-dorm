@@ -64,9 +64,11 @@ const initialSchedule = {
 };
 
 const initialScheduleMeta = {
-    taskInstalled: false,
-    taskName: '',
-    commandPath: '',
+    runtimeActive: false,
+    driver: 'node-cron',
+    cronPattern: '',
+    timezone: 'Asia/Shanghai',
+    lastTriggeredAt: null,
 };
 
 function formatClock(value) {
@@ -209,9 +211,11 @@ export default function App() {
                     setDebuggerStatus(debuggerData);
                     setSchedule(scheduleData.config ?? initialSchedule);
                     setScheduleMeta({
-                        taskInstalled: scheduleData.taskInstalled ?? false,
-                        taskName: scheduleData.taskName ?? '',
-                        commandPath: scheduleData.commandPath ?? '',
+                        runtimeActive: scheduleData.runtimeActive ?? false,
+                        driver: scheduleData.driver ?? 'node-cron',
+                        cronPattern: scheduleData.cronPattern ?? '',
+                        timezone: scheduleData.timezone ?? 'Asia/Shanghai',
+                        lastTriggeredAt: scheduleData.lastTriggeredAt ?? null,
                     });
                     setServerReady(true);
                 }
@@ -279,9 +283,11 @@ export default function App() {
             const data = await response.json();
             setSchedule(data.config ?? initialSchedule);
             setScheduleMeta({
-                taskInstalled: data.taskInstalled ?? false,
-                taskName: data.taskName ?? '',
-                commandPath: data.commandPath ?? '',
+                runtimeActive: data.runtimeActive ?? false,
+                driver: data.driver ?? 'node-cron',
+                cronPattern: data.cronPattern ?? '',
+                timezone: data.timezone ?? 'Asia/Shanghai',
+                lastTriggeredAt: data.lastTriggeredAt ?? null,
             });
         }
         catch {
@@ -390,9 +396,11 @@ export default function App() {
 
             setSchedule(data.config ?? initialSchedule);
             setScheduleMeta({
-                taskInstalled: data.taskInstalled ?? false,
-                taskName: data.taskName ?? '',
-                commandPath: data.commandPath ?? '',
+                runtimeActive: data.runtimeActive ?? false,
+                driver: data.driver ?? 'node-cron',
+                cronPattern: data.cronPattern ?? '',
+                timezone: data.timezone ?? 'Asia/Shanghai',
+                lastTriggeredAt: data.lastTriggeredAt ?? null,
             });
             setLogs((current) => [
                 createLog(
@@ -889,7 +897,7 @@ export default function App() {
                 <div className="schedule-panel">
                     <div className="section-heading">
                         <h2>定时自动签到</h2>
-                        <p>配置一次后，系统会在你指定的时间自动触发本地签到脚本。</p>
+                        <p>配置一次后，只要本地服务保持运行，内置调度器就会在指定时间自动触发签到。</p>
                     </div>
 
                     <label className="toggle-row">
@@ -973,16 +981,16 @@ export default function App() {
 
                     <div className="fact-strip schedule-facts">
                         <article>
-                            <span>计划任务</span>
-                            <strong>{scheduleMeta.taskInstalled ? '已安装' : '未安装'}</strong>
+                            <span>调度状态</span>
+                            <strong>{scheduleMeta.runtimeActive ? '运行中' : '未运行'}</strong>
                         </article>
                         <article>
                             <span>下次执行</span>
                             <strong>{formatDateTimeVerbose(schedule.nextRunAt)}</strong>
                         </article>
                         <article>
-                            <span>最近结果</span>
-                            <strong>{schedule.lastResult ?? '暂无记录'}</strong>
+                            <span>最近触发</span>
+                            <strong>{formatDateTimeVerbose(scheduleMeta.lastTriggeredAt)}</strong>
                         </article>
                     </div>
 
@@ -1000,21 +1008,21 @@ export default function App() {
                 <div className="schedule-notes">
                     <div className="section-heading">
                         <h2>调度说明</h2>
-                        <p>这里配的是规则，本机会按这个规则在后台决定今天要不要真正发起签到。</p>
+                        <p>这里配的是规则，服务进程会用 node-cron 每天定时触发，再由脚本判断今天要不要真正签到。</p>
                     </div>
 
                     <div className="notes-list">
                         <article className="note-item">
                             <span>01</span>
-                            <p>“每天”和“工作日”会创建一个固定时间的本地计划任务，再由脚本判断今天是否该执行。</p>
+                            <p>“每天”和“工作日”都会在服务进程里注册一个固定时间的 node-cron 任务，再由脚本判断今天是否该执行。</p>
                         </article>
                         <article className="note-item">
                             <span>02</span>
-                            <p>“指定日期”同样会在每天固定时间唤起一次脚本，但只有你选中的日期才会真正签到。</p>
+                            <p>“指定日期”同样会在每天固定时间触发一次，但只有你选中的日期才会真正签到。</p>
                         </article>
                         <article className="note-item">
                             <span>03</span>
-                            <p>计划任务入口是 {scheduleMeta.commandPath || '本地命令文件'}，最近一次执行结果会写回页面。</p>
+                            <p>当前调度驱动是 {scheduleMeta.driver}，时区为 {scheduleMeta.timezone}，最近执行结果会写回页面。</p>
                         </article>
                     </div>
                 </div>
