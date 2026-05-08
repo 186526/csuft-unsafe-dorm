@@ -1,11 +1,11 @@
 import process from "node:process";
 import EventEmitter from 'node:events';
 import { pathToFileURL } from 'node:url';
-import main from './main';
-import type { MainEvents } from './main';
+import main from './main.js';
+import type { MainEvents } from './main.js';
 import 'dotenv/config';
 
-export type { MainEvents } from './main';
+export type { MainEvents } from './main.js';
 
 interface LogEvents {
     log: [...args: any[]];

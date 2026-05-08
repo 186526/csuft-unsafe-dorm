@@ -1,10 +1,12 @@
 import axios from 'axios';
-import * as constant from './constant';
+import * as constant from './constant.js';
 
 import { createHash } from 'node:crypto';
 
-import * as types from './types';
+import * as types from './types.js';
 
+// 对学校接口的底层封装。
+// 这里负责登录、读取任务详情、校验定位距离，并最终提交签到数据。
 export function md5(data: string): string {
     return createHash('md5').update(data).digest('hex');
 }
@@ -392,6 +394,7 @@ export class unsafeDorm {
             throw new Error('Task does not have dormitory location info.');
         }
 
+        // 宿舍基准经纬度来自任务详情里的 dormitoryRegisterVO，不是项目里写死的常量。
         const dormLat = taskInfo.dormitoryRegisterVO.locationLat,
             dormLng = taskInfo.dormitoryRegisterVO.locationLng;
 

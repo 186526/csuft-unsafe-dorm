@@ -2,7 +2,7 @@ import "dotenv/config";
 import axios from "axios";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import main, { MainEvents } from "./main";
+import main, { MainEvents } from "./main.js";
 import { EventEmitter } from "node:events";
 
 type OpenIdState = {

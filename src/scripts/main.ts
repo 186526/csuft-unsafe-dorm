@@ -1,7 +1,9 @@
-import unsafeDorm, { getDistance } from '../index';
+import unsafeDorm, { getDistance } from '../index.js';
 import EventEmitter from 'node:events';
-import type { AuthTokenResponse, RecordStatus, TaskDetails, TaskInfo } from '../types';
+import type { AuthTokenResponse, RecordStatus, TaskDetails, TaskInfo } from '../types.js';
 
+// 签到主流程：
+// 逐个处理 OpenID，登录 -> 拉取任务 -> 校验时间 -> 查询状态 -> 提交签到。
 export interface MainEvents {
     wait: [time: number];
     log: [...args: any[]];
@@ -18,6 +20,28 @@ export interface MainEvents {
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function getFailureHint(error: unknown): string | null {
+    if (!(error instanceof Error)) {
+        return null;
+    }
+
+    const message = error.message.toLowerCase();
+
+    if (message.includes('spawn eperm')) {
+        return '当前环境禁止 tsx/esbuild 拉起子进程，脚本还没真正发出签到请求。';
+    }
+
+    if (message.includes('connect eacces') || message.includes('network error')) {
+        return '当前环境网络被拦截，签到请求没有成功发到服务器。';
+    }
+
+    if (message.includes('timed out') || message.includes('timeout')) {
+        return '连接签到服务器超时，本次未能完成请求。';
+    }
+
+    return null;
+}
 
 function parseHmsToSeconds(time: string): number {
     const parts = time.split(":").map((part) => Number(part));
@@ -122,6 +146,9 @@ export default async function main(openids: string[], events: EventEmitter<MainE
                 continue;
             }
 
+            // 签到经纬度不是前端写死的，而是来自任务详情里的宿舍坐标：
+            // `dormitoryRegisterVO.locationLat/locationLng`。
+            // 当前实现会在宿舍坐标附近加一个很小的随机偏移，再用于提交签到。
             const signLat = parseFloat(taskDetail.dormitoryRegisterVO.locationLat) + Math.random() * 0.001,
                 signLng = parseFloat(taskDetail.dormitoryRegisterVO.locationLng) + Math.random() * 0.001;
 
@@ -137,6 +164,7 @@ export default async function main(openids: string[], events: EventEmitter<MainE
             waitingTime = 1000 + Math.random() * 2000;
             events.emit('wait', waitingTime);
             events.emit('log', "等待", (waitingTime / 1000).toFixed(1), "秒，提交签到信息...");
+
             const signRecordResponse = await App.signRecord({
                 taskId: taskDetail.taskId,
                 signLat: signLat,
@@ -150,6 +178,10 @@ export default async function main(openids: string[], events: EventEmitter<MainE
         }
         catch (error) {
             events.emit('error', error);
+            const failureHint = getFailureHint(error);
+            if (failureHint) {
+                events.emit('log', failureHint);
+            }
             events.emit('log', "尝试失败！请检查 openid 是否正确，或者是否在签到时间内，或者您已签到。");
             events.emit('finish', openid);
         }

@@ -1,4 +1,4 @@
-import { md5, getDistance } from './index';
+import { md5, getDistance } from './index.js';
 
 export interface stuSignData {
     taskId: string; // taskId 平安打卡项目 ID
