@@ -188,14 +188,10 @@ export default async function main(openids: string[], events: EventEmitter<MainE
             }
 
             if (recordStatus.isShowBtn === false) {
-                events.emit('log', '服务端当前未开放签到按钮，本次不提交签到请求。');
-                results.push({
-                    openid,
-                    status: 'skipped',
-                    message: `服务端未开放签到：${recordStatus.signStatusName}`,
-                });
-                events.emit('finish', openid);
-                continue;
+                events.emit(
+                    'log',
+                    '服务端状态返回未签，但按钮字段为未开放；继续尝试提交签到，由实际提交结果判定是否成功。',
+                );
             }
 
             const signLat = parseFloat(taskDetail.dormitoryRegisterVO.locationLat) + Math.random() * 0.001;

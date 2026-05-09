@@ -373,9 +373,9 @@ export class unsafeDorm {
 
         const recordStatus = await this.getRecordStatus(taskId);
 
-        if (recordStatus.signStatus != 3) {
+        if (recordStatus.signStatus === 0) {
             throw new Error(
-                'Record status is not normal unsigned, may be already signed or not allowed to sign.',
+                'Record is already signed, no need to submit again.',
             );
         }
 
@@ -422,24 +422,6 @@ export class unsafeDorm {
         if (taskInfo.openTakePhoto == 1) {
             throw new Error(
                 'Task requires photo, which is not supported in current version.',
-            );
-        }
-
-        // Check Time
-
-        const now = new Date();
-
-        // Notice: Sign start & end in UTC+8.
-        const signStartTime = new Date(
-            `${recordStatus.signDate}T${taskInfo.signStartTime}+0800`,
-        );
-        const signEndTime = new Date(
-            `${recordStatus.signDate}T${taskInfo.signEndTime}+0800`,
-        );
-
-        if (now < signStartTime || now > signEndTime) {
-            throw new Error(
-                `Current time ${now.toISOString()} is not within sign time range ${signStartTime.toISOString()} - ${signEndTime.toISOString()}.`,
             );
         }
 
