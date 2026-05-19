@@ -108,6 +108,12 @@ type PythonRuntime = {
     args: string[];
 };
 
+type MitmdumpRuntime = {
+    command: string;
+    args: string[];
+    source: string;
+};
+
 type ScheduleApiResponse = {
     config: ScheduleConfig;
     runtimeActive: boolean;
@@ -703,8 +709,12 @@ function getMitmVenvPythonPath() {
     return path.join(getMitmVenvBinDir(), getMitmExecutableName('python'));
 }
 
-function getMitmVenvMitmdumpPath() {
-    return path.join(getMitmVenvBinDir(), getMitmExecutableName('mitmdump'));
+function getLocalMitmdumpRuntime(): MitmdumpRuntime {
+    return {
+        command: getMitmVenvPythonPath(),
+        args: ['-m', 'mitmdump'],
+        source: 'project-local Python virtual environment',
+    };
 }
 
 async function getPythonRuntime(): Promise<PythonRuntime | null> {
@@ -732,10 +742,41 @@ async function getPythonRuntime(): Promise<PythonRuntime | null> {
     return null;
 }
 
-async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
-    const localMitmdump = getMitmVenvMitmdumpPath();
-    if (existsSync(localMitmdump)) {
-        return localMitmdump;
+async function canRunCommandCaptureOutput(
+    command: string,
+    args: string[],
+    cwd = ROOT,
+) {
+    try {
+        await runCommandCaptureOutput(command, args, cwd);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+async function isHealthyMitmVenv() {
+    const venvPython = getMitmVenvPythonPath();
+    const venvConfigPath = path.join(MITM_VENV_DIR, 'pyvenv.cfg');
+    if (!existsSync(venvPython) || !existsSync(venvConfigPath)) {
+        return false;
+    }
+
+    return await canRunCommandCaptureOutput(
+        venvPython,
+        ['-c', 'import sys; print(sys.executable)'],
+    );
+}
+
+async function canRunMitmdump(runtime: MitmdumpRuntime) {
+    return await canRunCommandCaptureOutput(runtime.command, [...runtime.args, '--version']);
+}
+
+async function resolveMitmdumpRuntime(pythonRuntime?: PythonRuntime | null): Promise<MitmdumpRuntime | null> {
+    const localRuntime = getLocalMitmdumpRuntime();
+    if (await canRunMitmdump(localRuntime)) {
+        return localRuntime;
     }
 
     try {
@@ -748,8 +789,12 @@ async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
             .split(/\r?\n/)
             .map((line) => line.trim())
             .find((line) => line.length > 0);
-        if (candidate) {
-            return candidate;
+        if (candidate && await canRunCommandCaptureOutput(candidate, ['--version'])) {
+            return {
+                command: candidate,
+                args: [],
+                source: 'system PATH',
+            };
         }
     }
     catch {
@@ -772,8 +817,12 @@ async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
             ROOT,
         );
         const candidate = output.trim();
-        if (candidate.length > 0 && existsSync(candidate)) {
-            return candidate;
+        if (candidate.length > 0 && existsSync(candidate) && await canRunCommandCaptureOutput(candidate, ['--version'])) {
+            return {
+                command: candidate,
+                args: [],
+                source: 'Python scripts directory',
+            };
         }
     }
     catch {
@@ -787,9 +836,15 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
     mkdirSync(MITM_HOME, { recursive: true });
 
     const venvPython = getMitmVenvPythonPath();
-    const venvConfigPath = path.join(MITM_VENV_DIR, 'pyvenv.cfg');
-    if (!existsSync(venvPython) || !existsSync(venvConfigPath)) {
-        onStatus('Creating a project-local Python virtual environment for mitmproxy.', 'install');
+    const venvExists = existsSync(MITM_VENV_DIR);
+    const venvHealthy = await isHealthyMitmVenv();
+    if (!venvHealthy) {
+        onStatus(
+            venvExists
+                ? 'The existing project-local mitmproxy environment looks broken. Rebuilding it now.'
+                : 'Creating a project-local Python virtual environment for mitmproxy.',
+            'install',
+        );
         await runCommand(
             pythonRuntime.command,
             [
@@ -801,6 +856,12 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
             ],
             ROOT,
             onStatus,
+        );
+    }
+
+    if (!await isHealthyMitmVenv()) {
+        throw new Error(
+            `The project-local Python virtual environment could not be prepared under ${MITM_VENV_DIR}.`,
         );
     }
 
@@ -824,11 +885,11 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
     return venvPython;
 }
 
-async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void) {
+async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void): Promise<MitmdumpRuntime> {
     const pythonRuntime = await getPythonRuntime();
-    const existingExecutable = await resolveMitmdumpExecutable(pythonRuntime);
-    if (existingExecutable) {
-        return existingExecutable;
+    const existingRuntime = await resolveMitmdumpRuntime(pythonRuntime);
+    if (existingRuntime) {
+        return existingRuntime;
     }
 
     if (!pythonRuntime) {
@@ -854,15 +915,15 @@ async function ensureMitmdumpReady(onStatus: (message: string, stage: string) =>
         onStatus,
     );
 
-    const installedExecutable = await resolveMitmdumpExecutable();
-    if (!installedExecutable) {
+    const installedRuntime = await resolveMitmdumpRuntime();
+    if (!installedRuntime) {
         throw new Error(
-            'mitmproxy installation finished, but the project-local mitmdump executable could not be located. Check the virtual environment under .codex-tools/mitmproxy/venv and try again.',
+            'mitmproxy installation finished, but the project-local mitmdump command still could not be started. Check the virtual environment under .codex-tools/mitmproxy/venv and try again.',
         );
     }
 
     onStatus('mitmproxy is installed into the project-local environment and ready.', 'install');
-    return installedExecutable;
+    return installedRuntime;
 }
 
 async function buildScheduleResponse(config: ScheduleConfig): Promise<ScheduleApiResponse> {
@@ -991,7 +1052,7 @@ async function waitForOpenIdInCaptureFile(filePath: string, timeoutMs: number) {
 
 async function captureOpenIdViaMitmproxy(
     onStatus: (message: string, stage: string) => void,
-    mitmdumpExecutable: string,
+    mitmdumpRuntime: MitmdumpRuntime,
 ): Promise<CaptureResult> {
     mkdirSync(MITM_HOME, { recursive: true });
     await writeFile(MITM_CAPTURE_FILE, '', 'utf8');
@@ -1007,7 +1068,8 @@ async function captureOpenIdViaMitmproxy(
         ProxyOverride: mergeProxyOverride(originalProxy.ProxyOverride ?? '', ['localhost', '127.0.0.1', '<local>']),
     };
 
-    const child = spawn(mitmdumpExecutable, [
+    const child = spawn(mitmdumpRuntime.command, [
+        ...mitmdumpRuntime.args,
         '-q',
         '-s',
         MITM_ADDON_PATH,
@@ -1025,7 +1087,7 @@ async function captureOpenIdViaMitmproxy(
     });
 
     try {
-        onStatus('Starting local proxy capture with mitmproxy.', 'launch');
+        onStatus(`Starting local proxy capture with mitmproxy from the ${mitmdumpRuntime.source}.`, 'launch');
         await waitForPort(MITM_PROXY_PORT, 10000);
         await waitForFile(MITM_CERT_PATH, 10000);
         await ensureMitmCertificate(onStatus);
@@ -1304,9 +1366,9 @@ async function handleCaptureStream(res: ServerResponse) {
         sendStatus('Preparing the local capture environment.', 'prepare');
         let result: CaptureResult;
         try {
-            const mitmdumpExecutable = await ensureMitmdumpReady(sendStatus);
-            sendStatus('Using mitmproxy for automatic OpenID capture.', 'prepare');
-            result = await captureOpenIdViaMitmproxy(sendStatus, mitmdumpExecutable);
+            const mitmdumpRuntime = await ensureMitmdumpReady(sendStatus);
+            sendStatus(`Using mitmproxy from the ${mitmdumpRuntime.source} for automatic OpenID capture.`, 'prepare');
+            result = await captureOpenIdViaMitmproxy(sendStatus, mitmdumpRuntime);
         }
         catch (error) {
             if (!ENABLE_WMPF_DEBUGGER_FALLBACK) {
