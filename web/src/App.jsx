@@ -173,7 +173,7 @@ export default function App() {
     const [schedule, setSchedule] = useState(initialSchedule);
     const [scheduleMeta, setScheduleMeta] = useState(initialScheduleMeta);
     const [scheduleDateInput, setScheduleDateInput] = useState('');
-    const [captureStatus, setCaptureStatus] = useState('准备好后，点一次按钮即可自动准备抓取环境。');
+    const [captureStatus, setCaptureStatus] = useState('准备好后，点一次按钮即可自动安装并启动 mitmproxy 抓取环境。');
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingSchedule, setIsSavingSchedule] = useState(false);
     const [isRunning, setIsRunning] = useState(false);
@@ -234,9 +234,7 @@ export default function App() {
     }, []);
 
     const pendingChanges = joinOpenIds(openidList) !== joinOpenIds(savedOpenidList);
-    const captureButtonLabel = debuggerStatus.running
-        ? '开始捕获 OpenID'
-        : '一键准备并捕获 OpenID';
+    const captureButtonLabel = '一键获取 OpenID';
 
     const headline = useMemo(() => {
         if (summary.signedSuccess) {
@@ -422,11 +420,11 @@ export default function App() {
 
     function handleCapture() {
         setCaptureSummary(initialCaptureSummary);
-        setCaptureStatus('正在准备本地抓取环境。');
+        setCaptureStatus('正在准备本地抓取环境。缺失时会自动下载 mitmproxy。');
         setIsCapturing(true);
         setInlineError('');
         setLogs((current) => [
-            createLog('开始准备 OpenID 抓取环境，外部只需要你在微信里点一次登录。'),
+            createLog('开始准备 OpenID 抓取环境；如果 mitmproxy 缺失，会先自动下载安装。'),
             ...current,
         ]);
 
@@ -609,8 +607,9 @@ export default function App() {
                     <h1>{headline}</h1>
                     <p>
                         现在这个页面既能做签到，也能自动准备抓取环境来获取 <code>OpenID</code>。
-                        如果本机可用 <code>mitmproxy</code>，页面会优先走本地代理抓取；否则再回退到
-                        <code> WMPFDebugger </code> 方案。
+                        页面默认使用 <code>mitmproxy</code> 本地代理抓取 OpenID；如果本机缺失
+                        <code> mitmdump </code>，点击后会自动下载安装，不再默认回退到
+                        <code> WMPFDebugger </code>。
                     </p>
                 </div>
                 <div className={`hero-status tone-${statusTone(summary)}`}>
@@ -815,7 +814,7 @@ export default function App() {
                 <div className={`capture-panel tone-${captureTone(captureSummary)}`}>
                     <div className="section-heading">
                         <h2>一键获取 OpenID</h2>
-                        <p>页面会优先尝试本地代理抓取，必要时再回退到调试器方案。当前调试器监听地址是 {debuggerWsUrl || '未读取'}。</p>
+                        <p>页面默认使用 mitmproxy 本地代理抓取；如果本机缺失 mitmdump，点击后会自动下载安装。调试器监听地址是 {debuggerWsUrl || '未读取'}。</p>
                     </div>
 
                     <div className="detail-list">
@@ -837,7 +836,7 @@ export default function App() {
                             <ShieldCheck size={18} />
                             <div>
                                 <span>调试器回退状态</span>
-                                <strong>{debuggerStatus.running ? 'WMPFDebugger 已就绪' : '未启用，优先走本地代理'}</strong>
+                                <strong>{debuggerStatus.running ? 'WMPFDebugger 已就绪（备用）' : '默认不自动回退到 WMPFDebugger'}</strong>
                             </div>
                         </div>
                     </div>

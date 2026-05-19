@@ -34,6 +34,7 @@ const DEBUGGER_LOG_PATH = path.join(DEBUGGER_DIR, 'codex-debugger.log');
 const DEBUGGER_PID_PATH = path.join(DEBUGGER_DIR, 'codex-debugger.pid');
 const DEBUGGER_REPO_URL = process.env.WMPF_DEBUGGER_REPO_URL ?? 'https://github.com/186526/WMPFDebugger';
 const DEBUGGER_WS_URL = process.env.WMPF_DEBUGGER_WS_URL ?? 'ws://127.0.0.1:62000';
+const DEBUGGER_PREPARE_TIMEOUT_MS = Number(process.env.WMPF_DEBUGGER_PREPARE_TIMEOUT_MS ?? '60000');
 const CAPTURE_TIMEOUT_MS = Number(process.env.OPENID_CAPTURE_TIMEOUT_MS ?? '120000');
 const MITM_PROXY_PORT = Number(process.env.MITM_OPENID_PROXY_PORT ?? '8866');
 const MITM_HOME = path.join(TOOL_HOME, 'mitmproxy');
@@ -41,6 +42,15 @@ const MITM_CAPTURE_FILE = path.join(MITM_HOME, 'openid-capture.jsonl');
 const MITM_LOG_PATH = path.join(MITM_HOME, 'mitmdump.log');
 const MITM_ADDON_PATH = path.join(ROOT, 'src', 'mitm_openid_addon.py');
 const MITM_CERT_PATH = path.join(process.env.USERPROFILE ?? ROOT, '.mitmproxy', 'mitmproxy-ca-cert.cer');
+const WMPF_DEBUGGER_PATCH_MARKER = 'codex-wmpf-process-compat';
+const ENABLE_WMPF_DEBUGGER_FALLBACK = /^(1|true|yes)$/i.test(process.env.ENABLE_WMPF_DEBUGGER_FALLBACK ?? '');
+
+type WechatRuntimeProcess = {
+    name: string;
+    pid: number;
+    parentPid: number;
+    path: string;
+};
 type Summary = {
     startedAt: string;
     completedAt?: string;
@@ -90,6 +100,11 @@ type ProxySettings = {
     ProxyServer: string;
     ProxyOverride: string;
     AutoConfigURL: string;
+};
+
+type PythonRuntime = {
+    command: string;
+    args: string[];
 };
 
 type ScheduleApiResponse = {
@@ -320,6 +335,190 @@ async function getDebuggerStatus(): Promise<DebuggerStatus> {
     };
 }
 
+function normalizeJsonArray<T>(value: unknown): T[] {
+    if (Array.isArray(value)) {
+        return value as T[];
+    }
+
+    if (value == null) {
+        return [];
+    }
+
+    return [value as T];
+}
+
+async function listWechatRuntimeProcesses(): Promise<WechatRuntimeProcess[]> {
+    const output = await runPowerShell(`
+        $items = @(
+            Get-CimInstance Win32_Process | Where-Object {
+                $_.Name -match '^(WeChatAppEx|WeChatAppHost|WeChat|Weixin)\\.exe$' -or
+                ($_.ExecutablePath -and $_.ExecutablePath -match 'WMPF')
+            } | Select-Object @{
+                Name = 'name'; Expression = { $_.Name }
+            }, @{
+                Name = 'pid'; Expression = { [int]$_.ProcessId }
+            }, @{
+                Name = 'parentPid'; Expression = { [int]$_.ParentProcessId }
+            }, @{
+                Name = 'path'; Expression = { [string]$_.ExecutablePath }
+            }
+        )
+        $items | ConvertTo-Json -Compress
+    `);
+
+    if (!output) {
+        return [];
+    }
+
+    return normalizeJsonArray<WechatRuntimeProcess>(JSON.parse(output)).map((process) => ({
+        name: String(process.name ?? ''),
+        pid: Number(process.pid ?? 0),
+        parentPid: Number(process.parentPid ?? 0),
+        path: String(process.path ?? ''),
+    }));
+}
+
+function selectWechatMiniProgramRuntime(processes: WechatRuntimeProcess[]): WechatRuntimeProcess | null {
+    const runtimeProcesses = processes.filter((process) =>
+        process.name === 'WeChatAppEx.exe'
+        || process.name === 'WeChatAppHost.exe'
+        || /(?:^|\\)(?:WeChatAppEx|WeChatAppHost)\.exe$/i.test(process.path)
+        || /(?:^|\\)(?:Radium)?WMPF/i.test(process.path),
+    );
+
+    if (runtimeProcesses.length === 0) {
+        return null;
+    }
+
+    const parentPidCounts = new Map<number, number>();
+    for (const process of runtimeProcesses) {
+        if (process.parentPid > 0) {
+            parentPidCounts.set(process.parentPid, (parentPidCounts.get(process.parentPid) ?? 0) + 1);
+        }
+    }
+
+    const parentPid = Array.from(parentPidCounts.entries())
+        .sort((left, right) => right[1] - left[1])
+        .at(0)?.[0];
+
+    if (parentPid != null) {
+        return processes.find((process) => process.pid === parentPid) ?? runtimeProcesses[0];
+    }
+
+    return runtimeProcesses[0];
+}
+
+function extractWmpfVersion(processPath: string): number | null {
+    const matches = processPath.match(/\d+/g);
+    if (!matches || matches.length === 0) {
+        return null;
+    }
+
+    const version = Number(matches[matches.length - 1]);
+    if (!Number.isFinite(version) || version <= 0) {
+        return null;
+    }
+
+    return version;
+}
+
+async function waitForWechatMiniProgramRuntime(onStatus: (message: string, stage: string) => void) {
+    onStatus(
+        'WMPFDebugger needs the target WeChat mini program process. Open WeChat PC, enter the target mini program, and keep that page open.',
+        'prepare',
+    );
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < DEBUGGER_PREPARE_TIMEOUT_MS) {
+        const processes = await listWechatRuntimeProcesses();
+        const runtimeProcess = selectWechatMiniProgramRuntime(processes);
+        if (runtimeProcess) {
+            onStatus(
+                `Detected mini program runtime process ${runtimeProcess.name} (pid ${runtimeProcess.pid}).`,
+                'prepare',
+            );
+            return runtimeProcess;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    throw new Error(
+        'No WeChat mini program runtime process was found. Open WeChat PC, enter the target mini program, keep it open, and then start capture again.',
+    );
+}
+
+async function ensureWmpfVersionSupported(processPath: string, onStatus: (message: string, stage: string) => void) {
+    const version = extractWmpfVersion(processPath);
+    if (version == null) {
+        onStatus('Could not infer the current WMPF version from the process path. Continuing anyway.', 'version');
+        return;
+    }
+
+    const addressesPath = path.join(DEBUGGER_DIR, 'frida', 'config', `addresses.${version}.json`);
+    if (!existsSync(addressesPath)) {
+        throw new Error(
+            `Detected WMPF version ${version}, but the bundled WMPFDebugger has no addresses.${version}.json. Install mitmproxy or update WMPFDebugger before using debugger fallback.`,
+        );
+    }
+
+    onStatus(`Detected WMPF version ${version}.`, 'version');
+}
+
+async function patchBundledWmpfDebugger(onStatus: (message: string, stage: string) => void) {
+    const debuggerEntryPath = path.join(DEBUGGER_DIR, 'src', 'index.ts');
+    if (!existsSync(debuggerEntryPath)) {
+        return;
+    }
+
+    const source = await readFile(debuggerEntryPath, 'utf8');
+    if (source.includes(WMPF_DEBUGGER_PATCH_MARKER)) {
+        return;
+    }
+
+    const processDetectionPattern =
+        /const wmpfProcesses = processes\.filter\([\s\S]*?if \(wmpfPid === undefined\) \{\s*throw new Error\("\[frida\] WeChatAppEx\.exe process not found"\);\s*return;\s*}/;
+
+    const patchedSource = source.replace(
+        processDetectionPattern,
+        `// ${WMPF_DEBUGGER_PATCH_MARKER}
+    const targetProcessNames = ["WeChatAppEx.exe", "WeChatAppHost.exe"];
+    const wmpfProcesses = processes.filter(process => {
+        const processPath = String(process.parameters.path ?? "");
+        return targetProcessNames.includes(process.name)
+            || /(?:^|\\\\)(?:WeChatAppEx|WeChatAppHost)\\.exe$/i.test(processPath)
+            || /(?:^|\\\\)(?:Radium)?WMPF/i.test(processPath);
+    });
+    const wmpfPids = wmpfProcesses
+        .map(process => process.parameters.ppid ? Number(process.parameters.ppid) : 0)
+        .filter(pid => pid > 0);
+
+    // find the parent process
+    const fallbackPid = wmpfProcesses.find(process => process.pid > 0)?.pid;
+    const wmpfPid = wmpfPids
+        .sort((a, b) => wmpfPids.filter(v => v === a).length - wmpfPids.filter(v => v === b).length)
+        .pop() ?? fallbackPid;
+    if (wmpfPid === undefined) {
+        const relatedProcesses = processes
+            .filter(process => {
+                const processPath = String(process.parameters.path ?? "");
+                return /wechat|weixin/i.test(process.name) || /wmpf/i.test(processPath);
+            })
+            .map(process => \`\${process.name}#\${process.pid}\`)
+            .join(", ");
+        throw new Error(\`[frida] WMPF runtime process not found. Open the WeChat mini program before starting the debugger. Related processes: \${relatedProcesses || "none"}\`);
+    }`,
+    );
+
+    if (patchedSource === source) {
+        onStatus('WMPFDebugger source layout changed, skipping the local process-name compatibility patch.', 'patch');
+        return;
+    }
+
+    await writeFile(debuggerEntryPath, patchedSource, 'utf8');
+    onStatus('Applied the local WMPFDebugger process-name compatibility patch.', 'patch');
+}
+
 function getCommandName(base: 'npm' | 'git') {
     return process.platform === 'win32' ? `${base}.cmd` : base;
 }
@@ -368,6 +567,44 @@ async function runCommand(
     });
 }
 
+async function runCommandCaptureOutput(
+    command: string,
+    args: string[],
+    cwd: string,
+) {
+    return await new Promise<string>((resolve, reject) => {
+        const child = spawn(command, args, {
+            cwd,
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (chunk: Buffer) => {
+            stdout += chunk.toString();
+        });
+
+        child.stderr.on('data', (chunk: Buffer) => {
+            stderr += chunk.toString();
+        });
+
+        child.on('error', (error) => {
+            reject(error);
+        });
+
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve(stdout.trim());
+                return;
+            }
+
+            reject(new Error(stderr.trim() || `${command} exited with code ${code ?? -1}`));
+        });
+    });
+}
+
 async function waitForPort(port: number, timeoutMs: number) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
@@ -379,6 +616,21 @@ async function waitForPort(port: number, timeoutMs: number) {
     }
 
     throw new Error(`Timed out waiting for local debugger port ${port}.`);
+}
+
+async function readRecentLogLines(filePath: string, maxLines = 20) {
+    try {
+        const content = await readFile(filePath, 'utf8');
+        return content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+            .slice(-maxLines)
+            .join(' | ');
+    }
+    catch {
+        return '';
+    }
 }
 
 function runPowerShell(script: string) {
@@ -419,6 +671,128 @@ async function commandExists(command: string) {
     catch {
         return false;
     }
+}
+
+async function getPythonRuntime(): Promise<PythonRuntime | null> {
+    if (await commandExists('py')) {
+        return {
+            command: 'py',
+            args: ['-3'],
+        };
+    }
+
+    if (await commandExists('python')) {
+        return {
+            command: 'python',
+            args: [],
+        };
+    }
+
+    return null;
+}
+
+async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
+    try {
+        const output = await runCommandCaptureOutput(
+            process.platform === 'win32' ? 'where.exe' : 'which',
+            ['mitmdump'],
+            ROOT,
+        );
+        const candidate = output
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find((line) => line.length > 0);
+        if (candidate) {
+            return candidate;
+        }
+    }
+    catch {
+        // ignore where/which failure and continue probing
+    }
+
+    if (!pythonRuntime) {
+        return null;
+    }
+
+    const scriptName = process.platform === 'win32' ? 'mitmdump.exe' : 'mitmdump';
+    try {
+        const output = await runCommandCaptureOutput(
+            pythonRuntime.command,
+            [
+                ...pythonRuntime.args,
+                '-c',
+                `import os, sysconfig; print(os.path.join(sysconfig.get_path("scripts"), "${scriptName}"))`,
+            ],
+            ROOT,
+        );
+        const candidate = output.trim();
+        if (candidate.length > 0 && existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    catch {
+        // ignore python path probing failure
+    }
+
+    return null;
+}
+
+async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void) {
+    const pythonRuntime = await getPythonRuntime();
+    const existingExecutable = await resolveMitmdumpExecutable(pythonRuntime);
+    if (existingExecutable) {
+        return existingExecutable;
+    }
+
+    if (!pythonRuntime) {
+        throw new Error(
+            'mitmdump is missing and no Python runtime was found, so it cannot be downloaded automatically on this machine.',
+        );
+    }
+
+    onStatus('mitmproxy is not installed. Downloading and installing it automatically now.', 'install');
+
+    try {
+        await runCommand(
+            pythonRuntime.command,
+            [...pythonRuntime.args, '-m', 'pip', '--version'],
+            ROOT,
+        );
+    }
+    catch {
+        onStatus('pip is unavailable, bootstrapping it with ensurepip first.', 'install');
+        await runCommand(
+            pythonRuntime.command,
+            [...pythonRuntime.args, '-m', 'ensurepip', '--upgrade'],
+            ROOT,
+            onStatus,
+        );
+    }
+
+    await runCommand(
+        pythonRuntime.command,
+        [
+            ...pythonRuntime.args,
+            '-m',
+            'pip',
+            'install',
+            '--disable-pip-version-check',
+            '--user',
+            'mitmproxy',
+        ],
+        ROOT,
+        onStatus,
+    );
+
+    const installedExecutable = await resolveMitmdumpExecutable(pythonRuntime);
+    if (!installedExecutable) {
+        throw new Error(
+            'mitmproxy installation finished, but mitmdump still could not be located. Check your Python user Scripts directory and try again.',
+        );
+    }
+
+    onStatus('mitmproxy is installed and ready.', 'install');
+    return installedExecutable;
 }
 
 async function buildScheduleResponse(config: ScheduleConfig): Promise<ScheduleApiResponse> {
@@ -540,11 +914,10 @@ async function waitForOpenIdInCaptureFile(filePath: string, timeoutMs: number) {
     throw new Error('Timed out waiting for mitmproxy to capture the OpenID response.');
 }
 
-async function captureOpenIdViaMitmproxy(onStatus: (message: string, stage: string) => void): Promise<CaptureResult> {
-    if (!(await commandExists('mitmdump'))) {
-        throw new Error('mitmdump is not installed on this machine.');
-    }
-
+async function captureOpenIdViaMitmproxy(
+    onStatus: (message: string, stage: string) => void,
+    mitmdumpExecutable: string,
+): Promise<CaptureResult> {
     await ensureMitmCertificate(onStatus);
     mkdirSync(MITM_HOME, { recursive: true });
     await writeFile(MITM_CAPTURE_FILE, '', 'utf8');
@@ -560,7 +933,7 @@ async function captureOpenIdViaMitmproxy(onStatus: (message: string, stage: stri
         ProxyOverride: mergeProxyOverride(originalProxy.ProxyOverride ?? '', ['localhost', '127.0.0.1', '<local>']),
     };
 
-    const child = spawn('mitmdump', [
+    const child = spawn(mitmdumpExecutable, [
         '-q',
         '-s',
         MITM_ADDON_PATH,
@@ -625,10 +998,15 @@ async function ensureDebuggerReady(onStatus: (message: string, stage: string) =>
         onStatus('WMPFDebugger dependencies are already installed.', 'install');
     }
 
+    await patchBundledWmpfDebugger(onStatus);
+
     if (await isPortOpen(getDebuggerPort())) {
         onStatus('Debugger websocket is already listening.', 'ready');
         return await getDebuggerStatus();
     }
+
+    const runtimeProcess = await waitForWechatMiniProgramRuntime(onStatus);
+    await ensureWmpfVersionSupported(runtimeProcess.path, onStatus);
 
     onStatus('Starting WMPFDebugger in the background.', 'launch');
 
@@ -649,7 +1027,17 @@ async function ensureDebuggerReady(onStatus: (message: string, stage: string) =>
     child.unref();
     await writeFile(DEBUGGER_PID_PATH, String(child.pid), 'utf8');
 
-    await waitForPort(getDebuggerPort(), 45000);
+    try {
+        await waitForPort(getDebuggerPort(), 45000);
+    }
+    catch (error) {
+        const recentLog = await readRecentLogLines(DEBUGGER_LOG_PATH);
+        throw new Error(
+            recentLog.length > 0
+                ? `WMPFDebugger failed to start. Recent log: ${recentLog}`
+                : serializeError(error),
+        );
+    }
     onStatus('WMPFDebugger is ready. Go to WeChat and tap login once.', 'ready');
 
     return await getDebuggerStatus();
@@ -839,12 +1227,20 @@ async function handleCaptureStream(res: ServerResponse) {
     try {
         sendStatus('Preparing the local capture environment.', 'prepare');
         let result: CaptureResult;
-        if (await commandExists('mitmdump')) {
+        try {
+            const mitmdumpExecutable = await ensureMitmdumpReady(sendStatus);
             sendStatus('Using mitmproxy for automatic OpenID capture.', 'prepare');
-            result = await captureOpenIdViaMitmproxy(sendStatus);
+            result = await captureOpenIdViaMitmproxy(sendStatus, mitmdumpExecutable);
         }
-        else {
-            sendStatus('mitmproxy is unavailable, falling back to WMPFDebugger.', 'prepare');
+        catch (error) {
+            if (!ENABLE_WMPF_DEBUGGER_FALLBACK) {
+                throw error;
+            }
+
+            sendStatus(
+                `mitmproxy could not be prepared (${serializeError(error)}). Debugger fallback is explicitly enabled, switching to WMPFDebugger.`,
+                'prepare',
+            );
             await ensureDebuggerReady(sendStatus);
             result = await captureOpenIdFromDebugger(sendStatus);
         }
