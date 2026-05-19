@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$repo = 'C:\Users\WhenJayHe\Documents\Codex\2026-05-04\https-github-com-186526-csuft-unsafe\repo'
+$repo = Split-Path -Parent $MyInvocation.MyCommand.Path
 $npm = 'C:\Program Files\nodejs\npm.cmd'
 $scheduledLog = Join-Path $repo 'scheduled-task.log'
 

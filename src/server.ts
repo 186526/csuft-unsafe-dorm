@@ -43,20 +43,6 @@ const MITM_CAPTURE_FILE = path.join(MITM_HOME, 'openid-capture.jsonl');
 const MITM_LOG_PATH = path.join(MITM_HOME, 'mitmdump.log');
 const MITM_ADDON_PATH = path.join(ROOT, 'src', 'mitm_openid_addon.py');
 const MITM_CERT_PATH = path.join(process.env.USERPROFILE ?? ROOT, '.mitmproxy', 'mitmproxy-ca-cert.cer');
-const PYPI_SIMPLE_INDEX_URL = 'https://pypi.org/simple';
-const PYPI_TRUSTED_HOSTS = ['pypi.org', 'files.pythonhosted.org', 'pypi.python.org'];
-const PIP_INDEX_MIRRORS = [
-    {
-        label: 'Tsinghua PyPI mirror',
-        indexUrl: 'https://pypi.tuna.tsinghua.edu.cn/simple',
-        trustedHost: 'pypi.tuna.tsinghua.edu.cn',
-    },
-    {
-        label: 'Aliyun PyPI mirror',
-        indexUrl: 'https://mirrors.aliyun.com/pypi/simple',
-        trustedHost: 'mirrors.aliyun.com',
-    },
-] as const;
 const WMPF_DEBUGGER_PATCH_MARKER = 'codex-wmpf-process-compat';
 const ENABLE_WMPF_DEBUGGER_FALLBACK = /^(1|true|yes)$/i.test(process.env.ENABLE_WMPF_DEBUGGER_FALLBACK ?? '');
 
@@ -122,22 +108,10 @@ type PythonRuntime = {
     args: string[];
 };
 
-type PythonRuntimeInfo = {
-    executable: string;
-    version: string;
-    machine: string;
-    architecture: string;
-};
-
-type MitmdumpRuntime = {
-    command: string;
-    args: string[];
-    source: string;
-};
-
-type PipInstallStrategy = {
+type PipMirror = {
     label: string;
-    args: string[];
+    indexUrl: string;
+    trustedHost: string;
 };
 
 type ScheduleApiResponse = {
@@ -728,71 +702,59 @@ function getMitmExecutableName(base: 'python' | 'mitmdump') {
 }
 
 function getMitmVenvBinDir() {
-    return path.join(MITM_VENV_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
+    if (process.platform === 'win32') {
+        const scriptsDir = path.join(MITM_VENV_DIR, 'Scripts');
+        if (existsSync(scriptsDir)) {
+            return scriptsDir;
+        }
+
+        const binDir = path.join(MITM_VENV_DIR, 'bin');
+        if (existsSync(binDir)) {
+            return binDir;
+        }
+
+        return scriptsDir;
+    }
+
+    return path.join(MITM_VENV_DIR, 'bin');
 }
 
 function getMitmVenvPythonPath() {
     return path.join(getMitmVenvBinDir(), getMitmExecutableName('python'));
 }
 
-function getLocalMitmdumpRuntime(): MitmdumpRuntime {
-    return {
-        command: getMitmVenvPythonPath(),
-        args: ['-m', 'mitmdump'],
-        source: 'project-local Python virtual environment',
-    };
+function getMitmVenvMitmdumpPath() {
+    return path.join(getMitmVenvBinDir(), getMitmExecutableName('mitmdump'));
 }
 
-async function getPythonRuntime(): Promise<PythonRuntime | null> {
-    if (await commandExists('py')) {
-        return {
-            command: 'py',
-            args: ['-3'],
-        };
-    }
-
-    if (await commandExists('python')) {
-        return {
-            command: 'python',
-            args: [],
-        };
-    }
-
-    if (await commandExists('python3')) {
-        return {
-            command: 'python3',
-            args: [],
-        };
-    }
-
-    return null;
-}
-
-async function getPythonRuntimeInfo(command: string, args: string[]): Promise<PythonRuntimeInfo | null> {
+async function canUsePythonRuntime(runtime: PythonRuntime) {
     try {
         const output = await runCommandCaptureOutput(
-            command,
+            runtime.command,
             [
-                ...args,
+                ...runtime.args,
                 '-c',
-                'import json, platform, sys; print(json.dumps({"executable": sys.executable, "version": platform.python_version(), "machine": platform.machine(), "architecture": platform.architecture()[0]}))',
+                'import os, sys; print(sys.executable); print(sys.version)',
             ],
             ROOT,
         );
-        return JSON.parse(output) as PythonRuntimeInfo;
-    }
-    catch {
-        return null;
-    }
-}
+        const lines = output
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+        const executable = lines[0]?.toLowerCase() ?? '';
+        const version = lines[1] ?? '';
 
-async function canRunCommandCaptureOutput(
-    command: string,
-    args: string[],
-    cwd = ROOT,
-) {
-    try {
-        await runCommandCaptureOutput(command, args, cwd);
+        if (process.platform === 'win32') {
+            if (executable.includes('\\windowsapps\\')) {
+                return false;
+            }
+
+            if (executable.includes('\\msys64\\') || /\[gcc\b/i.test(version)) {
+                return false;
+            }
+        }
+
         return true;
     }
     catch {
@@ -800,138 +762,83 @@ async function canRunCommandCaptureOutput(
     }
 }
 
-async function isHealthyMitmVenv() {
-    const venvPython = getMitmVenvPythonPath();
-    const venvConfigPath = path.join(MITM_VENV_DIR, 'pyvenv.cfg');
-    if (!existsSync(venvPython) || !existsSync(venvConfigPath)) {
-        return false;
-    }
-
-    return await canRunCommandCaptureOutput(
-        venvPython,
-        ['-c', 'import sys; print(sys.executable)'],
+async function getPythonRuntimeExecutable(runtime: PythonRuntime) {
+    const output = await runCommandCaptureOutput(
+        runtime.command,
+        [
+            ...runtime.args,
+            '-c',
+            'import sys; print(sys.executable)',
+        ],
+        ROOT,
     );
+    return output
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? '';
 }
 
-async function canRunMitmdump(runtime: MitmdumpRuntime) {
-    return await canRunCommandCaptureOutput(runtime.command, [...runtime.args, '--version']);
-}
+async function getPythonRuntime(): Promise<PythonRuntime | null> {
+    const candidates: PythonRuntime[] = [];
 
-function createPipInstallArgs(
-    packages: string[],
-    options: {
-        indexUrl: string;
-        trustedHosts?: string[];
-        useTruststore?: boolean;
-    },
-) {
-    return [
-        '-m',
-        'pip',
-        'install',
-        '--disable-pip-version-check',
-        '--only-binary=:all:',
-        ...(options.useTruststore ? ['--use-feature=truststore'] : []),
-        '--index-url',
-        options.indexUrl,
-        ...(options.trustedHosts ?? []).flatMap((host) => ['--trusted-host', host]),
-        ...packages,
-    ];
-}
-
-function getMitmproxyInstallStrategies(): PipInstallStrategy[] {
-    return [
-        {
-            label: 'official PyPI using the system trust store',
-            args: createPipInstallArgs(
-                ['mitmproxy'],
-                {
-                    indexUrl: PYPI_SIMPLE_INDEX_URL,
-                    useTruststore: true,
-                },
-            ),
-        },
-        {
-            label: 'official PyPI trusted-host fallback',
-            args: createPipInstallArgs(
-                ['mitmproxy'],
-                {
-                    indexUrl: PYPI_SIMPLE_INDEX_URL,
-                    trustedHosts: PYPI_TRUSTED_HOSTS,
-                },
-            ),
-        },
-        ...PIP_INDEX_MIRRORS.map((mirror) => ({
-            label: `${mirror.label} with binary wheels only`,
-            args: createPipInstallArgs(
-                ['mitmproxy'],
-                {
-                    indexUrl: mirror.indexUrl,
-                    trustedHosts: [mirror.trustedHost],
-                },
-            ),
-        })),
-    ];
-}
-
-function explainMitmproxyInstallFailure(
-    lastError: unknown,
-    runtimeInfo: PythonRuntimeInfo | null,
-) {
-    const detail = serializeError(lastError);
-    const pythonDescription = runtimeInfo
-        ? `Python ${runtimeInfo.version} (${runtimeInfo.architecture}, ${runtimeInfo.machine}) at ${runtimeInfo.executable}`
-        : 'the detected Python runtime';
-
-    if (/CERTIFICATE_VERIFY_FAILED/i.test(detail)) {
-        return `Automatic mitmproxy installation could not verify the package index TLS certificate when using ${pythonDescription}.`;
+    const configuredPython = process.env.MITM_PYTHON_PATH?.trim();
+    if (configuredPython) {
+        candidates.push({
+            command: configuredPython,
+            args: [],
+        });
     }
 
-    if (/Rust not found|metadata-generation-failed|subprocess-exited-with-error/i.test(detail)) {
-        return `Automatic mitmproxy installation fell back to a source build while using ${pythonDescription}. This downloader only supports prebuilt binary wheels for mitmproxy and its native dependencies.`;
+    const bundledPython = path.join(
+        process.env.USERPROFILE ?? '',
+        '.cache',
+        'codex-runtimes',
+        'codex-primary-runtime',
+        'dependencies',
+        'python',
+        'python.exe',
+    );
+    if (process.platform === 'win32' && bundledPython.length > 0 && existsSync(bundledPython)) {
+        candidates.push({
+            command: bundledPython,
+            args: [],
+        });
     }
 
-    if (/No matching distribution found/i.test(detail)) {
-        return `No compatible prebuilt mitmproxy distribution was available for ${pythonDescription} from the package indexes that were tried.`;
+    if (await commandExists('py')) {
+        candidates.push({
+            command: 'py',
+            args: ['-3'],
+        });
     }
 
-    return `Automatic mitmproxy installation failed while using ${pythonDescription}. ${detail}`;
-}
+    if (await commandExists('python')) {
+        candidates.push({
+            command: 'python',
+            args: [],
+        });
+    }
 
-async function installMitmproxyWithFallbacks(
-    venvPython: string,
-    onStatus: (message: string, stage: string) => void,
-) {
-    const runtimeInfo = await getPythonRuntimeInfo(venvPython, []);
-    let lastError: unknown = null;
+    if (await commandExists('python3')) {
+        candidates.push({
+            command: 'python3',
+            args: [],
+        });
+    }
 
-    for (const strategy of getMitmproxyInstallStrategies()) {
-        try {
-            onStatus(`Installing mitmproxy via ${strategy.label}.`, 'install');
-            await runCommand(
-                venvPython,
-                strategy.args,
-                ROOT,
-                onStatus,
-            );
-            return;
-        }
-        catch (error) {
-            lastError = error;
-            onStatus(
-                `mitmproxy install via ${strategy.label} failed: ${serializeError(error)}`,
-                'detail',
-            );
+    for (const candidate of candidates) {
+        if (await canUsePythonRuntime(candidate)) {
+            return candidate;
         }
     }
 
-    throw new Error(explainMitmproxyInstallFailure(lastError, runtimeInfo));
+    return null;
 }
 
-async function resolveMitmdumpRuntime(pythonRuntime?: PythonRuntime | null): Promise<MitmdumpRuntime | null> {
-    const localRuntime = getLocalMitmdumpRuntime();
-    if (await canRunMitmdump(localRuntime)) {
-        return localRuntime;
+async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
+    const localMitmdump = getMitmVenvMitmdumpPath();
+    if (existsSync(localMitmdump)) {
+        return localMitmdump;
     }
 
     try {
@@ -944,12 +851,8 @@ async function resolveMitmdumpRuntime(pythonRuntime?: PythonRuntime | null): Pro
             .split(/\r?\n/)
             .map((line) => line.trim())
             .find((line) => line.length > 0);
-        if (candidate && await canRunCommandCaptureOutput(candidate, ['--version'])) {
-            return {
-                command: candidate,
-                args: [],
-                source: 'system PATH',
-            };
+        if (candidate) {
+            return candidate;
         }
     }
     catch {
@@ -972,12 +875,8 @@ async function resolveMitmdumpRuntime(pythonRuntime?: PythonRuntime | null): Pro
             ROOT,
         );
         const candidate = output.trim();
-        if (candidate.length > 0 && existsSync(candidate) && await canRunCommandCaptureOutput(candidate, ['--version'])) {
-            return {
-                command: candidate,
-                args: [],
-                source: 'Python scripts directory',
-            };
+        if (candidate.length > 0 && existsSync(candidate)) {
+            return candidate;
         }
     }
     catch {
@@ -991,15 +890,39 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
     mkdirSync(MITM_HOME, { recursive: true });
 
     const venvPython = getMitmVenvPythonPath();
-    const venvExists = existsSync(MITM_VENV_DIR);
-    const venvHealthy = await isHealthyMitmVenv();
-    if (!venvHealthy) {
-        onStatus(
-            venvExists
-                ? 'The existing project-local mitmproxy environment looks broken. Rebuilding it now.'
-                : 'Creating a project-local Python virtual environment for mitmproxy.',
-            'install',
-        );
+    const venvConfigPath = path.join(MITM_VENV_DIR, 'pyvenv.cfg');
+    let shouldRecreateVenv = !existsSync(venvPython) || !existsSync(venvConfigPath);
+
+    if (!shouldRecreateVenv && existsSync(venvConfigPath)) {
+        try {
+            const [venvConfig, runtimeExecutable] = await Promise.all([
+                readFile(venvConfigPath, 'utf8'),
+                getPythonRuntimeExecutable(pythonRuntime),
+            ]);
+            const normalizedRuntimeExecutable = runtimeExecutable.trim().toLowerCase();
+            const configExecutableLine = venvConfig
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .find((line) => line.toLowerCase().startsWith('executable = '));
+            const configExecutable = configExecutableLine
+                ? configExecutableLine.slice('executable = '.length).trim().toLowerCase()
+                : '';
+
+            if (
+                (configExecutable && normalizedRuntimeExecutable && configExecutable !== normalizedRuntimeExecutable) ||
+                configExecutable.includes('\\msys64\\')
+            ) {
+                shouldRecreateVenv = true;
+                onStatus('检测到已有 mitmproxy 虚拟环境来自其它 Python，正在重建。', 'install');
+            }
+        }
+        catch {
+            shouldRecreateVenv = true;
+        }
+    }
+
+    if (shouldRecreateVenv) {
+        onStatus('Creating a project-local Python virtual environment for mitmproxy.', 'install');
         await runCommand(
             pythonRuntime.command,
             [
@@ -1011,12 +934,6 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
             ],
             ROOT,
             onStatus,
-        );
-    }
-
-    if (!await isHealthyMitmVenv()) {
-        throw new Error(
-            `The project-local Python virtual environment could not be prepared under ${MITM_VENV_DIR}.`,
         );
     }
 
@@ -1040,16 +957,114 @@ async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (mes
     return venvPython;
 }
 
-async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void): Promise<MitmdumpRuntime> {
+function getPipMirrorCandidates(): PipMirror[] {
+    const customIndexUrl = process.env.PIP_INDEX_URL?.trim();
+    const customTrustedHost = process.env.PIP_TRUSTED_HOST?.trim();
+    const mirrors: PipMirror[] = [];
+
+    if (customIndexUrl) {
+        let trustedHost = customTrustedHost ?? '';
+        if (!trustedHost) {
+            try {
+                trustedHost = new URL(customIndexUrl).host;
+            }
+            catch {
+                trustedHost = '';
+            }
+        }
+
+        mirrors.push({
+            label: 'custom pip mirror',
+            indexUrl: customIndexUrl,
+            trustedHost,
+        });
+    }
+
+    mirrors.push(
+        {
+            label: 'official PyPI',
+            indexUrl: 'https://pypi.org/simple',
+            trustedHost: 'pypi.org',
+        },
+        {
+            label: 'Tsinghua Tuna mirror',
+            indexUrl: 'https://pypi.tuna.tsinghua.edu.cn/simple',
+            trustedHost: 'pypi.tuna.tsinghua.edu.cn',
+        },
+        {
+            label: 'Aliyun mirror',
+            indexUrl: 'https://mirrors.aliyun.com/pypi/simple',
+            trustedHost: 'mirrors.aliyun.com',
+        },
+    );
+
+    return mirrors;
+}
+
+async function installMitmproxyPackage(venvPython: string, onStatus: (message: string, stage: string) => void) {
+    const baseArgs = [
+        '-m',
+        'pip',
+        'install',
+        '--disable-pip-version-check',
+        '--prefer-binary',
+        '--only-binary=:all:',
+        'mitmproxy',
+    ];
+
+    try {
+        await runCommand(venvPython, baseArgs, ROOT, onStatus);
+        return;
+    }
+    catch (error) {
+        const message = serializeError(error);
+        const looksLikeCertificateError =
+            /CERTIFICATE_VERIFY_FAILED|SSLCertVerificationError|unable to get local issuer certificate/i.test(message);
+
+        if (!looksLikeCertificateError) {
+            throw error;
+        }
+
+        onStatus('pip 访问默认源时遇到证书校验问题，正在尝试镜像源。', 'install');
+
+        const mirrors = getPipMirrorCandidates();
+        let lastError: unknown = error;
+
+        for (const mirror of mirrors) {
+            try {
+                onStatus(`尝试通过 ${mirror.label} 安装 mitmproxy。`, 'install');
+                const args = [...baseArgs, '-i', mirror.indexUrl];
+                if (mirror.trustedHost) {
+                    args.push('--trusted-host', mirror.trustedHost);
+                    if (mirror.trustedHost === 'pypi.org') {
+                        args.push('--trusted-host', 'files.pythonhosted.org');
+                    }
+                }
+
+                await runCommand(venvPython, args, ROOT, onStatus);
+                return;
+            }
+            catch (mirrorError) {
+                lastError = mirrorError;
+            }
+        }
+
+        throw new Error(
+            `pip 默认源证书校验失败，镜像源重试也没有成功：${serializeError(lastError)}`,
+        );
+    }
+}
+
+async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void) {
     const pythonRuntime = await getPythonRuntime();
-    const existingRuntime = await resolveMitmdumpRuntime(pythonRuntime);
-    if (existingRuntime) {
-        return existingRuntime;
+    const existingExecutable = await resolveMitmdumpExecutable(pythonRuntime);
+    if (existingExecutable) {
+        return existingExecutable;
     }
 
     if (!pythonRuntime) {
         throw new Error(
-            'mitmdump is missing and no Python runtime was found, so it cannot be downloaded automatically on this machine.',
+            'mitmdump 缺失，而且当前没有找到适合安装 mitmproxy 的 Python。请安装标准 Windows CPython，或通过 MITM_PYTHON_PATH 指定一个可用的 python.exe。',
         );
     }
 
@@ -1057,17 +1072,17 @@ async function ensureMitmdumpReady(onStatus: (message: string, stage: string) =>
 
     const venvPython = await ensureMitmVirtualEnv(pythonRuntime, onStatus);
 
-    await installMitmproxyWithFallbacks(venvPython, onStatus);
+    await installMitmproxyPackage(venvPython, onStatus);
 
-    const installedRuntime = await resolveMitmdumpRuntime();
-    if (!installedRuntime) {
+    const installedExecutable = await resolveMitmdumpExecutable();
+    if (!installedExecutable) {
         throw new Error(
-            'mitmproxy installation finished, but the project-local mitmdump command still could not be started. Check the virtual environment under .codex-tools/mitmproxy/venv and try again.',
+            'mitmproxy installation finished, but the project-local mitmdump executable could not be located. Check the virtual environment under .codex-tools/mitmproxy/venv and try again.',
         );
     }
 
     onStatus('mitmproxy is installed into the project-local environment and ready.', 'install');
-    return installedRuntime;
+    return installedExecutable;
 }
 
 async function buildScheduleResponse(config: ScheduleConfig): Promise<ScheduleApiResponse> {
@@ -1196,7 +1211,7 @@ async function waitForOpenIdInCaptureFile(filePath: string, timeoutMs: number) {
 
 async function captureOpenIdViaMitmproxy(
     onStatus: (message: string, stage: string) => void,
-    mitmdumpRuntime: MitmdumpRuntime,
+    mitmdumpExecutable: string,
 ): Promise<CaptureResult> {
     mkdirSync(MITM_HOME, { recursive: true });
     await writeFile(MITM_CAPTURE_FILE, '', 'utf8');
@@ -1212,8 +1227,7 @@ async function captureOpenIdViaMitmproxy(
         ProxyOverride: mergeProxyOverride(originalProxy.ProxyOverride ?? '', ['localhost', '127.0.0.1', '<local>']),
     };
 
-    const child = spawn(mitmdumpRuntime.command, [
-        ...mitmdumpRuntime.args,
+    const child = spawn(mitmdumpExecutable, [
         '-q',
         '-s',
         MITM_ADDON_PATH,
@@ -1231,7 +1245,7 @@ async function captureOpenIdViaMitmproxy(
     });
 
     try {
-        onStatus(`Starting local proxy capture with mitmproxy from the ${mitmdumpRuntime.source}.`, 'launch');
+        onStatus('Starting local proxy capture with mitmproxy.', 'launch');
         await waitForPort(MITM_PROXY_PORT, 10000);
         await waitForFile(MITM_CERT_PATH, 10000);
         await ensureMitmCertificate(onStatus);
@@ -1510,9 +1524,9 @@ async function handleCaptureStream(res: ServerResponse) {
         sendStatus('Preparing the local capture environment.', 'prepare');
         let result: CaptureResult;
         try {
-            const mitmdumpRuntime = await ensureMitmdumpReady(sendStatus);
-            sendStatus(`Using mitmproxy from the ${mitmdumpRuntime.source} for automatic OpenID capture.`, 'prepare');
-            result = await captureOpenIdViaMitmproxy(sendStatus, mitmdumpRuntime);
+            const mitmdumpExecutable = await ensureMitmdumpReady(sendStatus);
+            sendStatus('Using mitmproxy for automatic OpenID capture.', 'prepare');
+            result = await captureOpenIdViaMitmproxy(sendStatus, mitmdumpExecutable);
         }
         catch (error) {
             if (!ENABLE_WMPF_DEBUGGER_FALLBACK) {
