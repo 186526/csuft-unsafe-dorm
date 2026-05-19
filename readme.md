@@ -1,5 +1,16 @@
 # csuft-unsafe-dorm
 
+## Quick Start
+
+```bash
+npm install
+npm run dev
+```
+
+- Running `npm install` in the repo root installs both the root dependencies and the `web/` Vite dependencies.
+- If someone runs `npm run dev` before installing, the project now auto-installs the missing root and `web/` packages first.
+- `requirements.txt` is not the fix for a missing `vite` or `node_modules` error. This project uses `package.json` and npm lockfiles for its main dependencies. A Python requirements file only makes sense for standalone Python tooling.
+
 另一个 CSUFT 平安打卡的 TypeScript 实现。
 
 ## Running

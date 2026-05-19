@@ -38,6 +38,7 @@ const DEBUGGER_PREPARE_TIMEOUT_MS = Number(process.env.WMPF_DEBUGGER_PREPARE_TIM
 const CAPTURE_TIMEOUT_MS = Number(process.env.OPENID_CAPTURE_TIMEOUT_MS ?? '120000');
 const MITM_PROXY_PORT = Number(process.env.MITM_OPENID_PROXY_PORT ?? '8866');
 const MITM_HOME = path.join(TOOL_HOME, 'mitmproxy');
+const MITM_VENV_DIR = path.join(MITM_HOME, 'venv');
 const MITM_CAPTURE_FILE = path.join(MITM_HOME, 'openid-capture.jsonl');
 const MITM_LOG_PATH = path.join(MITM_HOME, 'mitmdump.log');
 const MITM_ADDON_PATH = path.join(ROOT, 'src', 'mitm_openid_addon.py');
@@ -618,6 +619,19 @@ async function waitForPort(port: number, timeoutMs: number) {
     throw new Error(`Timed out waiting for local debugger port ${port}.`);
 }
 
+async function waitForFile(filePath: string, timeoutMs: number) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        if (existsSync(filePath)) {
+            return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    throw new Error(`Timed out waiting for file ${filePath}.`);
+}
+
 async function readRecentLogLines(filePath: string, maxLines = 20) {
     try {
         const content = await readFile(filePath, 'utf8');
@@ -673,6 +687,26 @@ async function commandExists(command: string) {
     }
 }
 
+function getMitmExecutableName(base: 'python' | 'mitmdump') {
+    if (process.platform !== 'win32') {
+        return base;
+    }
+
+    return base === 'python' ? 'python.exe' : 'mitmdump.exe';
+}
+
+function getMitmVenvBinDir() {
+    return path.join(MITM_VENV_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
+}
+
+function getMitmVenvPythonPath() {
+    return path.join(getMitmVenvBinDir(), getMitmExecutableName('python'));
+}
+
+function getMitmVenvMitmdumpPath() {
+    return path.join(getMitmVenvBinDir(), getMitmExecutableName('mitmdump'));
+}
+
 async function getPythonRuntime(): Promise<PythonRuntime | null> {
     if (await commandExists('py')) {
         return {
@@ -688,10 +722,22 @@ async function getPythonRuntime(): Promise<PythonRuntime | null> {
         };
     }
 
+    if (await commandExists('python3')) {
+        return {
+            command: 'python3',
+            args: [],
+        };
+    }
+
     return null;
 }
 
 async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
+    const localMitmdump = getMitmVenvMitmdumpPath();
+    if (existsSync(localMitmdump)) {
+        return localMitmdump;
+    }
+
     try {
         const output = await runCommandCaptureOutput(
             process.platform === 'win32' ? 'where.exe' : 'which',
@@ -737,6 +783,47 @@ async function resolveMitmdumpExecutable(pythonRuntime?: PythonRuntime | null) {
     return null;
 }
 
+async function ensureMitmVirtualEnv(pythonRuntime: PythonRuntime, onStatus: (message: string, stage: string) => void) {
+    mkdirSync(MITM_HOME, { recursive: true });
+
+    const venvPython = getMitmVenvPythonPath();
+    const venvConfigPath = path.join(MITM_VENV_DIR, 'pyvenv.cfg');
+    if (!existsSync(venvPython) || !existsSync(venvConfigPath)) {
+        onStatus('Creating a project-local Python virtual environment for mitmproxy.', 'install');
+        await runCommand(
+            pythonRuntime.command,
+            [
+                ...pythonRuntime.args,
+                '-m',
+                'venv',
+                ...(existsSync(MITM_VENV_DIR) ? ['--clear'] : []),
+                MITM_VENV_DIR,
+            ],
+            ROOT,
+            onStatus,
+        );
+    }
+
+    try {
+        await runCommand(
+            venvPython,
+            ['-m', 'pip', '--version'],
+            ROOT,
+        );
+    }
+    catch {
+        onStatus('pip is unavailable inside the project mitmproxy environment, bootstrapping it now.', 'install');
+        await runCommand(
+            venvPython,
+            ['-m', 'ensurepip', '--upgrade'],
+            ROOT,
+            onStatus,
+        );
+    }
+
+    return venvPython;
+}
+
 async function ensureMitmdumpReady(onStatus: (message: string, stage: string) => void) {
     const pythonRuntime = await getPythonRuntime();
     const existingExecutable = await resolveMitmdumpExecutable(pythonRuntime);
@@ -750,48 +837,31 @@ async function ensureMitmdumpReady(onStatus: (message: string, stage: string) =>
         );
     }
 
-    onStatus('mitmproxy is not installed. Downloading and installing it automatically now.', 'install');
+    onStatus('mitmproxy is not installed. Creating a project-local environment and installing it now.', 'install');
 
-    try {
-        await runCommand(
-            pythonRuntime.command,
-            [...pythonRuntime.args, '-m', 'pip', '--version'],
-            ROOT,
-        );
-    }
-    catch {
-        onStatus('pip is unavailable, bootstrapping it with ensurepip first.', 'install');
-        await runCommand(
-            pythonRuntime.command,
-            [...pythonRuntime.args, '-m', 'ensurepip', '--upgrade'],
-            ROOT,
-            onStatus,
-        );
-    }
+    const venvPython = await ensureMitmVirtualEnv(pythonRuntime, onStatus);
 
     await runCommand(
-        pythonRuntime.command,
+        venvPython,
         [
-            ...pythonRuntime.args,
             '-m',
             'pip',
             'install',
             '--disable-pip-version-check',
-            '--user',
             'mitmproxy',
         ],
         ROOT,
         onStatus,
     );
 
-    const installedExecutable = await resolveMitmdumpExecutable(pythonRuntime);
+    const installedExecutable = await resolveMitmdumpExecutable();
     if (!installedExecutable) {
         throw new Error(
-            'mitmproxy installation finished, but mitmdump still could not be located. Check your Python user Scripts directory and try again.',
+            'mitmproxy installation finished, but the project-local mitmdump executable could not be located. Check the virtual environment under .codex-tools/mitmproxy/venv and try again.',
         );
     }
 
-    onStatus('mitmproxy is installed and ready.', 'install');
+    onStatus('mitmproxy is installed into the project-local environment and ready.', 'install');
     return installedExecutable;
 }
 
@@ -874,10 +944,15 @@ async function ensureMitmCertificate(onStatus: (message: string, stage: string) 
         throw new Error(`mitmproxy certificate was not found at ${MITM_CERT_PATH}.`);
     }
 
-    const existing = await runPowerShell(
-        "certutil -user -store Root | Select-String -Pattern 'O=mitmproxy, CN=mitmproxy' | ForEach-Object { $_.Line }",
-    );
-    if (existing.includes('mitmproxy')) {
+    const exactCertificateTrusted = await runPowerShell(`
+        $certPath = '${escapePowerShell(MITM_CERT_PATH)}'
+        $thumbprint = (Get-PfxCertificate $certPath).Thumbprint
+        $existing = Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Thumbprint -eq $thumbprint } | Select-Object -First 1
+        if ($null -ne $existing) {
+            Write-Output 'trusted'
+        }
+    `);
+    if (exactCertificateTrusted.includes('trusted')) {
         onStatus('mitmproxy root certificate is already trusted.', 'certificate');
         return;
     }
@@ -918,7 +993,6 @@ async function captureOpenIdViaMitmproxy(
     onStatus: (message: string, stage: string) => void,
     mitmdumpExecutable: string,
 ): Promise<CaptureResult> {
-    await ensureMitmCertificate(onStatus);
     mkdirSync(MITM_HOME, { recursive: true });
     await writeFile(MITM_CAPTURE_FILE, '', 'utf8');
 
@@ -953,6 +1027,8 @@ async function captureOpenIdViaMitmproxy(
     try {
         onStatus('Starting local proxy capture with mitmproxy.', 'launch');
         await waitForPort(MITM_PROXY_PORT, 10000);
+        await waitForFile(MITM_CERT_PATH, 10000);
+        await ensureMitmCertificate(onStatus);
         await applyProxySettings(proxySettings);
         onStatus('Proxy capture is ready. Open the WeChat mini program and tap login once.', 'ready');
         return await waitForOpenIdInCaptureFile(MITM_CAPTURE_FILE, CAPTURE_TIMEOUT_MS);

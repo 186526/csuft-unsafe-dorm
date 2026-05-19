@@ -14,16 +14,27 @@
   },
   "type": "module",
   "scripts": {
+    "setup": "node scripts/ensure-deps.mjs",
+    "postinstall": "npm --prefix web install",
     "build": "tsc",
     "build:web": "npm --prefix web run build",
+    "prebuild:web": "node scripts/ensure-deps.mjs",
     "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "predev": "node scripts/ensure-deps.mjs",
     "dev:api": "tsx src/server.ts",
+    "predev:api": "node scripts/ensure-deps.mjs",
     "dev:web": "npm --prefix web run dev",
+    "predev:web": "node scripts/ensure-deps.mjs",
     "preview:web": "npm --prefix web run preview",
+    "prepreview:web": "node scripts/ensure-deps.mjs",
     "script": "npm run build && node out/scripts/index.js",
+    "prescript": "node scripts/ensure-deps.mjs",
     "script:schedule-runner": "npm run build && node out/scripts/schedule-runner.js",
+    "prescript:schedule-runner": "node scripts/ensure-deps.mjs",
     "script:ui": "tsx src/scripts/ui-trigger.ts",
-    "script:bark": "npm run build && node out/scripts/bark-bot.js"
+    "prescript:ui": "node scripts/ensure-deps.mjs",
+    "script:bark": "npm run build && node out/scripts/bark-bot.js",
+    "prescript:bark": "node scripts/ensure-deps.mjs"
   },
   "license": "MIT"
 }
