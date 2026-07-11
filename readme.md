@@ -1,4 +1,8 @@
-# csuft-unsafe-dorm
+# 中南林业科技大学平安打卡（CSUFT 平安签到 / 晚打卡）
+
+面向中南林业科技大学（CSUFT）的平安打卡自动化工具，使用 TypeScript 实现，支持平安签到、晚打卡、OpenID、多账号、定时任务和 Web 控制面板。
+
+**常用检索词：** 中南林业科技大学 平安打卡、中南林业科技大学 平安签到、中南林业科技大学 晚打卡、中南林业科技大学平安打卡、CSUFT 平安打卡。
 
 ## Quick Start
 
@@ -10,8 +14,6 @@ npm run dev
 - Running `npm install` in the repo root installs both the root dependencies and the `web/` Vite dependencies.
 - If someone runs `npm run dev` before installing, the project now auto-installs the missing root and `web/` packages first.
 - `requirements.txt` is not the fix for a missing `vite` or `node_modules` error. This project uses `package.json` and npm lockfiles for its main dependencies. A Python requirements file only makes sense for standalone Python tooling.
-
-另一个 CSUFT 平安打卡的 TypeScript 实现。中南林业科技大学平安打卡/平安签到
 
 ## Running
 
