@@ -1,10 +1,12 @@
 import axios from 'axios';
-import * as constant from './constant';
+import * as constant from './constant.js';
 
 import { createHash } from 'node:crypto';
 
-import * as types from './types';
+import * as types from './types.js';
 
+// 对学校接口的底层封装。
+// 这里负责登录、读取任务详情、校验定位距离，并最终提交签到数据。
 export function md5(data: string): string {
     return createHash('md5').update(data).digest('hex');
 }
@@ -371,9 +373,9 @@ export class unsafeDorm {
 
         const recordStatus = await this.getRecordStatus(taskId);
 
-        if (recordStatus.signStatus != 3) {
+        if (recordStatus.signStatus === 0) {
             throw new Error(
-                'Record status is not normal unsigned, may be already signed or not allowed to sign.',
+                'Record is already signed, no need to submit again.',
             );
         }
 
@@ -392,6 +394,7 @@ export class unsafeDorm {
             throw new Error('Task does not have dormitory location info.');
         }
 
+        // 宿舍基准经纬度来自任务详情里的 dormitoryRegisterVO，不是项目里写死的常量。
         const dormLat = taskInfo.dormitoryRegisterVO.locationLat,
             dormLng = taskInfo.dormitoryRegisterVO.locationLng;
 
@@ -419,24 +422,6 @@ export class unsafeDorm {
         if (taskInfo.openTakePhoto == 1) {
             throw new Error(
                 'Task requires photo, which is not supported in current version.',
-            );
-        }
-
-        // Check Time
-
-        const now = new Date();
-
-        // Notice: Sign start & end in UTC+8.
-        const signStartTime = new Date(
-            `${recordStatus.signDate}T${taskInfo.signStartTime}+0800`,
-        );
-        const signEndTime = new Date(
-            `${recordStatus.signDate}T${taskInfo.signEndTime}+0800`,
-        );
-
-        if (now < signStartTime || now > signEndTime) {
-            throw new Error(
-                `Current time ${now.toISOString()} is not within sign time range ${signStartTime.toISOString()} - ${signEndTime.toISOString()}.`,
             );
         }
 

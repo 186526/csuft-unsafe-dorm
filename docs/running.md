@@ -47,7 +47,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
         ```bash
         > yarn run script
         yarn run v1.22.22
-        $ tsx src/scripts/index.ts
+        $ npm run build && node out/scripts/index.js
         计算定位偏移  109.9 m
         true
         Done in 4.84s.

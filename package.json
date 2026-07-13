@@ -1,18 +1,40 @@
 {
   "dependencies": {
     "axios": "^1.13.6",
-    "typescript": "^5.9.3"
+    "node-cron": "^4.2.1",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "dotenv": "^17.3.1",
     "tsx": "^4.21.0"
   },
   "type": "module",
   "scripts": {
+    "setup": "node scripts/ensure-deps.mjs",
+    "postinstall": "npm --prefix web install",
     "build": "tsc",
-    "script": "tsx src/scripts/index.ts",
-    "script:bark": "tsx src/scripts/bark-bot.ts"
+    "build:web": "npm --prefix web run build",
+    "prebuild:web": "node scripts/ensure-deps.mjs",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "predev": "node scripts/ensure-deps.mjs",
+    "dev:api": "tsx src/server.ts",
+    "predev:api": "node scripts/ensure-deps.mjs",
+    "dev:web": "npm --prefix web run dev",
+    "predev:web": "node scripts/ensure-deps.mjs",
+    "preview:web": "npm --prefix web run preview",
+    "prepreview:web": "node scripts/ensure-deps.mjs",
+    "script": "npm run build && node out/scripts/index.js",
+    "prescript": "node scripts/ensure-deps.mjs",
+    "script:schedule-runner": "npm run build && node out/scripts/schedule-runner.js",
+    "prescript:schedule-runner": "node scripts/ensure-deps.mjs",
+    "script:ui": "tsx src/scripts/ui-trigger.ts",
+    "prescript:ui": "node scripts/ensure-deps.mjs",
+    "script:bark": "npm run build && node out/scripts/bark-bot.js",
+    "prescript:bark": "node scripts/ensure-deps.mjs"
   },
   "license": "MIT"
 }

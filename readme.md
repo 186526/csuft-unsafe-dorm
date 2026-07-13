@@ -1,6 +1,19 @@
-# csuft-unsafe-dorm
+# 中南林业科技大学平安打卡（CSUFT 平安签到 / 晚打卡）
 
-另一个 CSUFT 平安打卡的 TypeScript 实现。
+面向中南林业科技大学（CSUFT）的平安打卡自动化工具，使用 TypeScript 实现，支持平安签到、晚打卡、OpenID、多账号、定时任务和 Web 控制面板。
+
+**常用检索词：** 中南林业科技大学 平安打卡、中南林业科技大学 平安签到、中南林业科技大学 晚打卡、中南林业科技大学平安打卡、CSUFT 平安打卡。
+
+## Quick Start
+
+```bash
+npm install
+npm run dev
+```
+
+- Running `npm install` in the repo root installs both the root dependencies and the `web/` Vite dependencies.
+- If someone runs `npm run dev` before installing, the project now auto-installs the missing root and `web/` packages first.
+- `requirements.txt` is not the fix for a missing `vite` or `node_modules` error. This project uses `package.json` and npm lockfiles for its main dependencies. A Python requirements file only makes sense for standalone Python tooling.
 
 ## Running
 
@@ -15,3 +28,146 @@
 ## References
 
 - [请求签名机制分析 - github.com/Feather-P/ahut-dorm-sign](https://github.com/Feather-P/ahut-dorm-sign/blob/master/docs/%E8%AF%B7%E6%B1%82%E7%AD%BE%E5%90%8D%E5%88%86%E6%9E%90.md)
+## 项目功能
+
+- 支持使用 OpenID 进行认证与签到
+- 支持单账号和多账号连续签到
+- 支持本地页面保存 OpenID、抓取 OpenID、手动执行签到
+- 支持配置每天、工作日、指定日期的自动签到
+- 支持自动签到失败补跑，同一天成功后自动去重
+- 支持本地中文日志记录，便于查看每次自动签到结果
+
+## 使用说明
+
+### 1. 安装依赖
+
+在项目根目录执行：
+
+```bash
+npm install
+```
+
+或：
+
+```bash
+yarn
+```
+
+### 2. 配置 OpenID
+
+在项目根目录创建 `.env` 文件，并写入：
+
+```env
+openid=你的openid
+```
+
+如果有多个账号，可以使用英文逗号分隔：
+
+```env
+openid=openid_1,openid_2
+```
+
+### 3. 手动运行脚本
+
+执行：
+
+```bash
+npm run script
+```
+
+### 4. 启动本地页面
+
+执行：
+
+```bash
+npm run dev
+```
+
+启动后可在本地页面中完成：
+
+- 保存 OpenID
+- 抓取 OpenID
+- 手动签到
+- 配置自动签到
+- 查看最近一次执行结果
+
+### 5. 自动签到说明
+
+- 保存自动签到配置后，项目会在当前后端进程内注册 `node-cron` 定时任务
+- 到达设定时间后，会自动触发签到脚本
+- 如果当天已成功签到，后续重复触发会自动跳过
+- 如果当天触发失败，后续触发仍可继续补跑
+
+### 6. 日志位置
+
+- 计划任务总日志：`scheduled-task.log`
+- 每次自动签到独立日志目录：`日志`
+
+自动签到独立日志文件命名格式为：
+
+`年-月-日-时-分-秒+结果.log`
+
+示例：
+
+- `2026-05-08-21-28-26成功.log`
+- `2026-05-08-21-29-28跳过.log`
+
+## 图文使用说明
+
+### 1. 打开终端到当前项目所在目录，运行 `npm run dev`
+
+在项目根目录打开终端，执行下面的命令启动前后端开发服务：
+
+```bash
+npm run dev
+```
+
+正常情况下，终端会先输出启动命令和服务启动信息。如果后端未正常启动，也可以根据终端输出继续排查。
+
+![图片一](./docs/img_1.png)
+
+![图片二](./docs/img_2.png)
+
+### 2. 在浏览器中输入 `localhost:3001` 进入前端界面
+
+服务启动后，在浏览器地址栏输入：
+
+```text
+http://localhost:3001
+```
+
+进入前端界面后，可以看到首页中的“配置与执行”“结果概览”等区域。
+
+![图片三](./docs/img_3.png)
+
+### 3. 下滑至“一键获取 OpenID”界面并点击“开始捕获 OpenID”
+
+在页面中向下滚动，找到“一键获取 OpenID”模块。
+
+点击“开始捕获 OpenID”后，页面会自动准备本地抓取环境；如果环境正常，页面会进入监听状态，等待你在微信小程序里重新登录。
+
+![图片四](./docs/img_4.png)
+
+![图片五](./docs/img_5.png)
+
+### 4. 打开微信小程序，重新进行登录，完成 OpenID 的捕获
+
+打开微信小程序，重新执行登录操作。当前端监听页面捕获到登录请求后，会自动识别并提取 OpenID。
+
+当捕获成功后，前端页面会显示你的 OpenID，并提示捕获完成。此时即使小程序登录页面还在转圈，OpenID 也已经被成功抓取。
+
+![图片六](./docs/img_6.png)
+
+### 5. 回到“配置与执行”界面，确认 OpenID 已自动填写，然后点击“签到”
+
+此时返回“配置与执行”区域，可以看到 OpenID 已经自动写入到当前待签到账号列表中。
+
+确认无误后，点击“立即签到”按钮即可发起签到流程。
+
+![图片七](./docs/img_7.png)
+
+## 运行结果展示
+
+下面是签到执行结果展示示例，可用于快速确认页面是否已经正常进入执行阶段。
+
+![图片八](./docs/img_8.png)
