@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/path/to/csuft-unsafe-dorm
-EnvironmentFile=%h/.config/csuft-unsafe-dorm/bark.env
+Environment=BARK_CONFIG=%h/.config/csuft-unsafe-dorm/bark.yaml
 Environment=PATH=%h/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env yarn run script:bark
 StandardOutput=journal

@@ -28,7 +28,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
     > 目前由于服务器配置无法实现直接使用账号密码登录，因此需要使用 OpenId 来进行鉴权。  
     > 由于你专仅允许了 wxapp 的 OpenId 作为唯一的 OAuth 鉴权方式，所以请确保你已经在小程序中登录并绑定过。
 
-    请先查阅 [OpenId 抓取指南](./openid.md) 来获取你在小程序的唯一标识符 OpenId。
+    运行 `yarn capture:openid`，按提示在微信小程序中退出登录再重新登录一次，命令会输出你的 OpenID。详细步骤、环境要求和 WMPFDebugger 备用方案见 [OpenID 抓取指南](./openid.md)。
 
     请注意，我们绝对不会获取你的个人隐私，仅使用 OpenId 作为鉴权工具。
 
@@ -72,7 +72,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
     - 替换 `/path/to/csuft-unsafe-dorm` 为你本地项目的实际路径，替换 `/path/to/logfile.log` 为你希望保存日志的文件路径。
 
 7. 使用 systemd user timer 定时执行 Bark 推送脚本
-    - 仓库中有一个使用 Bark 作为推送服务器的示例脚本 `src/scripts/bark-bot.ts`，你可以通过 `yarn run script:bark` 来运行它。
+    - 仓库中有一个使用 Bark 作为推送服务器的示例脚本 `src/scripts/bark-bot.ts`，你可以通过 `yarn run script:bark` 来运行它。脚本从 YAML 文件读取配置，示例见仓库根目录的 `bark.example.yaml`。
 
     - 仓库已提供示例 unit 文件：
         - `docs/systemd-user/csuft-unsafe-dorm-bark.service`
@@ -86,18 +86,18 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
         cp docs/systemd-user/csuft-unsafe-dorm-bark.timer ~/.config/systemd/user/
         ```
 
-    - 创建环境变量文件：
+    - 创建 Bark 配置文件：
 
         ```bash
         mkdir -p ~/.config/csuft-unsafe-dorm
-        cat > ~/.config/csuft-unsafe-dorm/bark.env <<'EOF'
-        openid=你的openid1,你的openid2
-        BARK_API=https://api.day.app
-        BARK_DEVICE_TOKEN=你的bark设备token
-        EOF
+        cp bark.example.yaml ~/.config/csuft-unsafe-dorm/bark.yaml
         ```
 
-    - 按需修改 service 文件中的 `WorkingDirectory` 路径，确保与本地仓库路径一致。
+        按用户填写 `openid` 和 `bark.deviceKey`。`bark.globalDeviceKey` 接收一条包含所有人的汇总通知；每个填写了 `bark.deviceKey` 的用户再单独收到自己的状态。没有填写个人设备 key 的用户只出现在汇总通知中。
+
+        两类通知的标题都是 `平安打卡状态推送（应打卡 N 人，实际完成打卡 N 人，需关注 N 人）`。汇总通知按全部用户统计；个人通知只统计该用户。`签到成功` 和 `已签到` 计入完成，其余结果计入需关注。
+
+    - 按需修改 service 文件中的 `WorkingDirectory` 路径，确保与本地仓库路径一致。`BARK_CONFIG` 默认指向 `~/.config/csuft-unsafe-dorm/bark.yaml`，配置文件放在其它位置时同步修改。
 
     - 启用并立即运行一次：
 

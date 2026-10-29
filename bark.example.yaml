@@ -1,0 +1,22 @@
+# Bark 推送配置示例。
+# 复制为 bark.yaml 后填写，或通过 BARK_CONFIG 环境变量指定其它路径。
+#
+# 签到完成后会发送两类通知：
+# - 全局：所有人的状态汇总，发送到 bark.globalDeviceKey。
+# - 个人：每人自己的状态，发送到该用户的 bark.deviceKey；未配置的用户只出现在全局通知中。
+
+bark:
+  # Bark 服务地址
+  api: https://api.day.app
+  # 全局通知的设备 key
+  globalDeviceKey: 全局推送设备key
+
+users:
+  - name: 张三
+    openid: 张三的openid
+    bark:
+      deviceKey: 张三的设备key
+
+  - name: 李四
+    openid: 李四的openid
+    # 不配置 bark.deviceKey 时只出现在全局通知中

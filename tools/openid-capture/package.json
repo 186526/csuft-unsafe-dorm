@@ -1,0 +1,15 @@
+{
+  "name": "csuft-openid-capture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "openid-capture": "./cli.mjs"
+  },
+  "scripts": {
+    "capture": "node cli.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

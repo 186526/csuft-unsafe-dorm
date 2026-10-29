@@ -1,4 +1,4 @@
-# Hook WMPF to get openid for csuft-unsafe-dorm
+# 获取 OpenID for csuft-unsafe-dorm
 
 以下内容仅供学习和研究使用，请勿用于任何非法用途。
 
@@ -6,9 +6,34 @@
 
 该 OpenId 理论长期优先，所以以下操作大概率只需要操作首次进行抓取即可。
 
-## 配置 WMPFDebugger
+## 使用 mitmproxy 自动抓取
 
-我们将使用 WMPFDebugger 来 Hook 小程序。
+仓库自带独立的抓包工具 `tools/openid-capture`。它会启动本地 mitmproxy、临时切换系统代理，抓到 OpenID 后打印到标准输出并恢复原代理。
+
+环境要求：
+
+- Node.js 20 或更高版本。
+- Windows 或 macOS；Linux 需要 GNOME 桌面会话才能自动切换系统代理。
+- Python 3.12 或更高版本。首次运行时工具会把 mitmproxy 安装到 `tools/openid-capture/.cache/venv`。
+- 电脑版微信，以及微信中的“中南林业科技大学学生工作部”小程序。
+
+运行：
+
+```bash
+yarn capture:openid
+```
+
+看到“系统代理已切换”的提示后，在微信中打开小程序，退出登录再重新登录一次。标准输出只有一行 OpenID，把它填入 `.env`：
+
+```env
+openid=抓到的OpenID
+```
+
+参数、日志位置和 Linux 证书导入方式见 [`tools/openid-capture/README.md`](../tools/openid-capture/README.md)。
+
+## 配置 WMPFDebugger（备用方案）
+
+mitmproxy 不可用时，可以使用 WMPFDebugger 手动 Hook 小程序。
 
 1. 下载并允许 WMPFDebugger：
 
