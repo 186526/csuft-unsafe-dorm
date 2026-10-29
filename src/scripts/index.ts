@@ -36,8 +36,8 @@ export async function mainLoop() {
         logEvents.emit('log', ...args);
     });
 
-    events.on('error', (error) => {
-        logEvents.emit('error', '发生错误！', error);
+    events.on('error', (openid, error) => {
+        logEvents.emit('error', `处理 openid ${openid} 时发生错误！`, error);
     });
 
     events.on('start', (openid) => {

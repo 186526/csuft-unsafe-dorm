@@ -27,7 +27,6 @@ async function run() {
     const userByOpenid = new Map(config.users.map((user) => [user.openid, user]));
     const pushPromises: Promise<void>[] = [];
     const notifiedOpenids = new Set<string>();
-    let currentOpenid: string | null = null;
     let failedPushes = 0;
 
     for (const user of config.users) {
@@ -64,7 +63,6 @@ async function run() {
     }
 
     events.on("start", (openid) => {
-        currentOpenid = openid;
         if (!states.has(openid)) {
             states.set(openid, { openid });
         }
@@ -115,14 +113,11 @@ async function run() {
         states.set(openid, state);
     });
 
-    events.on("error", (error) => {
-        if (!currentOpenid) {
-            return;
-        }
-        const state = states.get(currentOpenid) || { openid: currentOpenid };
+    events.on("error", (openid, error) => {
+        const state = states.get(openid) || { openid };
         state.error = formatErrorMessage(error);
         state.time = new Date().toLocaleString();
-        states.set(currentOpenid, state);
+        states.set(openid, state);
     });
 
     events.on("finish", (openid) => {

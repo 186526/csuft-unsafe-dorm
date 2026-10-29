@@ -53,7 +53,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
         Done in 4.84s.
         ```
 
-    - 脚本会自动使用你提供的 OpenId 进行鉴权，并执行签到操作。
+    - 脚本会自动使用你提供的 OpenId 进行鉴权，并执行签到操作。多个 openid 默认由 3 个并发 worker 处理，每个 worker 独立执行随机等待与签到。
 
 6. 配置 crontab
     - 如果你希望定期自动执行签到，可以使用 crontab 来设置定时任务。

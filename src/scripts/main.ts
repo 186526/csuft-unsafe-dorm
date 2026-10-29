@@ -5,7 +5,7 @@ import type { AuthTokenResponse, RecordStatus, TaskDetails, TaskInfo } from '../
 export interface MainEvents {
     wait: [time: number];
     log: [...args: any[]];
-    error: [error: unknown];
+    error: [openid: string, error: unknown];
     start: [openid: string];
     finish: [openid: string];
     signInResult: [openid: string, signInResult: AuthTokenResponse];
@@ -57,12 +57,25 @@ function isWithinUtc8SignTimeWindow(startTime: string, endTime: string): boolean
     return now >= start || now <= end;
 }
 
-export default async function main(openids: string[], events: EventEmitter<MainEvents>) {
+export type MainOptions = {
+    concurrency?: number;
+};
+
+const DEFAULT_SIGN_CONCURRENCY = 3;
+
+export default async function main(
+    openids: string[],
+    events: EventEmitter<MainEvents>,
+    options: MainOptions = {},
+) {
     if (openids.length === 0) {
         throw new Error("请设置至少一个有效的 openid。");
     }
 
-    for (const openid of openids) {
+    const concurrency = Math.max(1, Math.min(options.concurrency ?? DEFAULT_SIGN_CONCURRENCY, openids.length));
+    const queue = [...openids];
+
+    async function signOpenid(openid: string) {
         events.emit('start', openid);
 
         let waitingTime = 5000 + Math.random() * 2500;
@@ -70,7 +83,7 @@ export default async function main(openids: string[], events: EventEmitter<MainE
         events.emit('log', "等待", (waitingTime / 1000).toFixed(1), "秒中, 避免风控...\n");
 
         await sleep(waitingTime);
-        events.emit('log', "开始执行下一个 openid（如果有）。\n");
+        events.emit('log', "开始处理该 openid。\n");
 
         const App = new unsafeDorm({
             openId: openid,
@@ -90,6 +103,9 @@ export default async function main(openids: string[], events: EventEmitter<MainE
             await sleep(waitingTime);
             const taskInfos = await App.listTask();
             events.emit('taskInfos', openid, taskInfos);
+            if (taskInfos.length === 0) {
+                throw new Error("任务信息列表为空，没有可签到的任务。");
+            }
             waitingTime = 1000 + Math.random() * 2000;
             events.emit('wait', waitingTime);
             events.emit('log', "获取任务信息列表成功！等待", (waitingTime / 1000).toFixed(1), "秒，仅尝试选择第 1 项获取任务信息:", taskInfos[0].taskName, taskInfos[0].taskId);
@@ -105,7 +121,7 @@ export default async function main(openids: string[], events: EventEmitter<MainE
                 events.emit('signTimeInvalid', openid, taskDetail.signStartTime, taskDetail.signEndTime);
                 events.emit('log', `当前不在签到时间内（UTC+8）：${taskDetail.signStartTime}~${taskDetail.signEndTime}`);
                 events.emit('finish', openid);
-                continue;
+                return;
             }
 
             events.emit('log', "等待", (waitingTime / 1000).toFixed(1), "秒，获取签到状态...");
@@ -117,9 +133,9 @@ export default async function main(openids: string[], events: EventEmitter<MainE
 
             if (recordStatus.signStatus === 0) {
                 events.emit('log', "当前已签到，签到时间为:", recordStatus.signTime);
-                events.emit('log', "跳过签到，继续下一个 openid（如果有）。\n");
+                events.emit('log', "跳过签到。\n");
                 events.emit('finish', openid);
-                continue;
+                return;
             }
 
             const signLat = parseFloat(taskDetail.dormitoryRegisterVO.locationLat) + Math.random() * 0.001,
@@ -149,12 +165,23 @@ export default async function main(openids: string[], events: EventEmitter<MainE
             events.emit('finish', openid);
         }
         catch (error) {
-            events.emit('error', error);
+            events.emit('error', openid, error);
             events.emit('log', "尝试失败！请检查 openid 是否正确，或者是否在签到时间内，或者您已签到。");
             events.emit('finish', openid);
         }
-
     }
+
+    async function worker() {
+        for (;;) {
+            const openid = queue.shift();
+            if (openid === undefined) {
+                return;
+            }
+            await signOpenid(openid);
+        }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     events.emit('log', "\n所有 openid 均已处理完成。");
     events.emit('destroy');
