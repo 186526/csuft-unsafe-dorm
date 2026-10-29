@@ -93,7 +93,7 @@ csuft-unsafe-dorm 作为一个库，在 `src/scripts/index.ts` 提供了一个�
         cp bark.example.yaml ~/.config/csuft-unsafe-dorm/bark.yaml
         ```
 
-        按用户填写 `openid` 和 `bark.deviceKey`。`bark.globalDeviceKey` 接收一条包含所有人的汇总通知；每个填写了 `bark.deviceKey` 的用户再单独收到自己的状态。没有填写个人设备 key 的用户只出现在汇总通知中。
+        按用户填写 `openid` 和 `bark.deviceKey`。每个填写了 `bark.deviceKey` 的用户在自己的签到结束后立即收到个人通知；`bark.globalDeviceKey` 在所有用户结束后收到一条汇总通知。汇总通知只列出需要关注的用户，全部正常时正文为「所有人员签到正常。」。
 
         两类通知的标题都是 `平安打卡状态推送（应打卡 N 人，实际完成打卡 N 人，需关注 N 人）`。汇总通知按全部用户统计；个人通知只统计该用户。`签到成功` 和 `已签到` 计入完成，其余结果计入需关注。
 

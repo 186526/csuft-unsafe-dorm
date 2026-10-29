@@ -7,7 +7,6 @@ import {
     buildEntry,
     buildTitle,
     joinContents,
-    planPushes,
     type SignState,
 } from "../bark-report";
 import { pushBark } from "../bark";
@@ -25,10 +24,43 @@ async function run() {
 
     const events = new EventEmitter<MainEvents>();
     const states = new Map<string, SignState>();
+    const userByOpenid = new Map(config.users.map((user) => [user.openid, user]));
+    const pushPromises: Promise<void>[] = [];
+    const notifiedOpenids = new Set<string>();
     let currentOpenid: string | null = null;
+    let failedPushes = 0;
 
     for (const user of config.users) {
         states.set(user.openid, { openid: user.openid, name: user.name });
+        if (!user.deviceKey) {
+            console.warn(`[bark] ${user.name ?? user.openid} 没有配置设备 key，跳过个人推送。`);
+        }
+    }
+
+    function notifyIndividual(openid: string) {
+        if (notifiedOpenids.has(openid)) {
+            return;
+        }
+        notifiedOpenids.add(openid);
+
+        const user = userByOpenid.get(openid);
+        if (!user?.deviceKey) {
+            return;
+        }
+
+        const state = states.get(openid) ?? { openid };
+        const entry = buildEntry(user, state);
+
+        pushPromises.push(
+            pushBark(config.api, user.deviceKey, buildTitle([entry]), joinContents([entry]))
+                .then(() => {
+                    console.log(`[bark] 已推送${entry.name}的个人状态。`);
+                })
+                .catch((error) => {
+                    failedPushes += 1;
+                    console.error(`[bark] 推送${entry.name}的个人状态失败：${formatErrorMessage(error)}`);
+                }),
+        );
     }
 
     events.on("start", (openid) => {
@@ -97,6 +129,7 @@ async function run() {
         if (!states.has(openid)) {
             states.set(openid, { openid });
         }
+        notifyIndividual(openid);
     });
 
     events.on("log", (...args) => {
@@ -108,30 +141,24 @@ async function run() {
     });
 
     await main(openids, events);
+    await Promise.all(pushPromises);
 
     const entries = config.users.map((user) => {
         const state = states.get(user.openid) ?? { openid: user.openid };
         return buildEntry(user, state);
     });
+    const attentionEntries = entries.filter((entry) => !entry.completed);
+    const globalBody = attentionEntries.length > 0
+        ? joinContents(attentionEntries)
+        : "所有人员签到正常。";
 
-    config.users.forEach((user, index) => {
-        if (!user.deviceKey) {
-            console.warn(`[bark] ${entries[index].name} 没有配置设备 key，跳过个人推送。`);
-        }
-    });
-
-    let failedPushes = 0;
-    for (const plan of planPushes(config, entries)) {
-        const description = plan.kind === "global" ? "全局状态" : `${plan.label}的个人状态`;
-
-        try {
-            await pushBark(config.api, plan.deviceKey, buildTitle(plan.entries), joinContents(plan.entries));
-            console.log(`[bark] 已推送${description}。`);
-        }
-        catch (error) {
-            failedPushes += 1;
-            console.error(`[bark] 推送${description}失败：${formatErrorMessage(error)}`);
-        }
+    try {
+        await pushBark(config.api, config.globalDeviceKey, buildTitle(entries), globalBody);
+        console.log("[bark] 已推送全局状态。");
+    }
+    catch (error) {
+        failedPushes += 1;
+        console.error(`[bark] 推送全局状态失败：${formatErrorMessage(error)}`);
     }
 
     if (failedPushes > 0) {

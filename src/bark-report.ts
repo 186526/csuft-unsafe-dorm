@@ -1,4 +1,4 @@
-import type { BarkConfig, BarkUser } from "./bark-config";
+import type { BarkUser } from "./bark-config";
 
 export type SignState = {
     openid: string;
@@ -16,13 +16,6 @@ export type ReportEntry = {
     completed: boolean;
 };
 
-export type PushPlan = {
-    kind: "global" | "individual";
-    label: string;
-    deviceKey: string;
-    entries: ReportEntry[];
-};
-
 const COMPLETED_RESULTS = new Set(["签到成功", "已签到"]);
 
 export function buildEntry(user: BarkUser, state: SignState): ReportEntry {
@@ -37,31 +30,6 @@ export function buildEntry(user: BarkUser, state: SignState): ReportEntry {
         completed: state.result !== undefined && COMPLETED_RESULTS.has(state.result),
         content: `签到信息：${name}#${accountId}, 签到条目：${taskName}, 签到结果：${result}, 签到时间：${time}`,
     };
-}
-
-export function planPushes(config: BarkConfig, entries: ReportEntry[]): PushPlan[] {
-    const plans: PushPlan[] = [{
-        kind: "global",
-        label: "全局",
-        deviceKey: config.globalDeviceKey,
-        entries,
-    }];
-
-    config.users.forEach((user, index) => {
-        if (!user.deviceKey) {
-            return;
-        }
-
-        const entry = entries[index];
-        plans.push({
-            kind: "individual",
-            label: entry.name,
-            deviceKey: user.deviceKey,
-            entries: [entry],
-        });
-    });
-
-    return plans;
 }
 
 export function buildTitle(entries: ReportEntry[]): string {
