@@ -51,7 +51,7 @@ async function run() {
         const entry = buildEntry(user, state);
 
         pushPromises.push(
-            pushBark(config.api, user.deviceKey, buildTitle([entry]), joinContents([entry]))
+            pushBark(user.api ?? config.api, user.deviceKey, buildTitle([entry]), joinContents([entry]))
                 .then(() => {
                     console.log(`[bark] 已推送${entry.name}的个人状态。`);
                 })

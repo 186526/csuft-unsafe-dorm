@@ -5,6 +5,7 @@ export type BarkUser = {
     openid: string;
     name?: string;
     deviceKey?: string;
+    api?: string;
 };
 
 export type BarkConfig = {
@@ -82,6 +83,11 @@ function validateBarkConfig(document: unknown, configPath: string): BarkConfig {
             const userDeviceKey = readOptionalString(item.bark.deviceKey, `${label}.bark.deviceKey`, configPath);
             if (userDeviceKey) {
                 user.deviceKey = userDeviceKey;
+            }
+
+            const userApi = readOptionalString(item.bark.api, `${label}.bark.api`, configPath);
+            if (userApi) {
+                user.api = userApi;
             }
         }
 

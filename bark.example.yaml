@@ -16,6 +16,8 @@ users:
     openid: 张三的openid
     bark:
       deviceKey: 张三的设备key
+      # 该用户使用其它 Bark 服务时填写，不填则使用上面的 bark.api
+      # api: https://api.day.app
 
   - name: 李四
     openid: 李四的openid
